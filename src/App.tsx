@@ -26,7 +26,8 @@ import {
   X,
   ChevronRight,
   File,
-  ChevronLeft
+  ChevronLeft,
+  Server
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Fuse, { FuseResultMatch } from 'fuse.js';
@@ -97,11 +98,10 @@ export default function App() {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [searchQuery, setSearchQuery] = useState('');
   const [systemStats, setSystemStats] = useState({
-    cpu: 0,
-    ram: 0,
-    disk: 0,
-    diskDetails: { used: '0', total: '0' },
-    hostname: 'CasaDash'
+    cpu: { usage: 0, cores: 0, brand: '', speed: 0 },
+    ram: { usagePercent: 0, usedGB: '0', totalGB: '0' },
+    disk: { usagePercent: 0, usedGB: '0', totalGB: '0' },
+    os: { distro: '', release: '', uptime: 0, hostname: 'CasaDash' }
   });
 
   // Modal States
@@ -118,6 +118,14 @@ export default function App() {
   const [loginUsername, setLoginUsername] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [loginError, setLoginError] = useState('');
+
+  // Wallpaper State
+  const DEFAULT_WALLPAPER = 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=2564&auto=format&fit=crop';
+  const [wallpaperUrl, setWallpaperUrl] = useState(() => {
+    return localStorage.getItem('casadash_wallpaper') || DEFAULT_WALLPAPER;
+  });
+  const [wallpaperError, setWallpaperError] = useState('');
+  const [wallpaperInputUrl, setWallpaperInputUrl] = useState('');
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -230,6 +238,118 @@ export default function App() {
     }
   };
 
+  const compressImage = (file: File): Promise<Blob> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = (event) => {
+        const img = new Image();
+        img.src = event.target?.result as string;
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+
+          // Max dimensions for wallpaper
+          const MAX_WIDTH = 1280;
+          const MAX_HEIGHT = 720;
+
+          if (width > height) {
+            if (width > MAX_WIDTH) {
+              height *= MAX_WIDTH / width;
+              width = MAX_WIDTH;
+            }
+          } else {
+            if (height > MAX_HEIGHT) {
+              width *= MAX_HEIGHT / height;
+              height = MAX_HEIGHT;
+            }
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx?.drawImage(img, 0, 0, width, height);
+
+          canvas.toBlob(
+            (blob) => {
+              if (blob) {
+                resolve(blob);
+              } else {
+                reject(new Error('Canvas to Blob failed'));
+              }
+            },
+            'image/jpeg',
+            0.6 // 60% quality to ensure < 1MB
+          );
+        };
+        img.onerror = (error) => reject(error);
+      };
+      reader.onerror = (error) => reject(error);
+    });
+  };
+
+  const handleWallpaperUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setWallpaperError('Processing image...');
+
+    try {
+      const compressedBlob = await compressImage(file);
+      const formData = new FormData();
+      formData.append('wallpaper', compressedBlob, file.name.replace(/\.[^/.]+$/, "") + ".jpg");
+
+      setWallpaperError('Uploading...');
+      const response = await fetch('/api/upload-wallpaper', {
+        method: 'POST',
+        body: formData,
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setWallpaperUrl(data.url);
+        localStorage.setItem('casadash_wallpaper', data.url);
+        setWallpaperError('Wallpaper updated successfully!');
+        setTimeout(() => setWallpaperError(''), 3000);
+      } else {
+        // Fallback: If server upload fails (e.g. Nginx 413 limit), store base64 directly
+        const reader = new FileReader();
+        reader.readAsDataURL(compressedBlob);
+        reader.onloadend = () => {
+          const base64data = reader.result as string;
+          try {
+            setWallpaperUrl(base64data);
+            localStorage.setItem('casadash_wallpaper', base64data);
+            setWallpaperError('Wallpaper saved locally!');
+            setTimeout(() => setWallpaperError(''), 3000);
+          } catch (e) {
+            setWallpaperError('Upload failed and image is too large to save locally.');
+          }
+        };
+      }
+    } catch (error) {
+      console.error('Failed to upload wallpaper', error);
+      setWallpaperError('Error processing or uploading image.');
+    }
+  };
+
+  const handleSetWallpaperUrl = () => {
+    if (!wallpaperInputUrl.trim()) return;
+    setWallpaperUrl(wallpaperInputUrl);
+    localStorage.setItem('casadash_wallpaper', wallpaperInputUrl);
+    setWallpaperInputUrl('');
+    setWallpaperError('Wallpaper updated from URL!');
+    setTimeout(() => setWallpaperError(''), 3000);
+  };
+
+  const handleResetWallpaper = () => {
+    setWallpaperUrl(DEFAULT_WALLPAPER);
+    localStorage.removeItem('casadash_wallpaper');
+    setWallpaperError('Wallpaper reset to default!');
+    setTimeout(() => setWallpaperError(''), 3000);
+  };
+
   const apps: AppIcon[] = [
     { id: 'files', name: 'Files', icon: <FolderOpen size={32} />, color: 'bg-blue-500', action: () => { setActiveModal('files'); fetchFiles(); } },
     { id: 'terminal', name: 'Terminal', icon: <TerminalIcon size={32} />, color: 'bg-zinc-800', action: () => setActiveModal('terminal') },
@@ -240,7 +360,7 @@ export default function App() {
     { id: 'music', name: 'Music', icon: <Music size={32} />, color: 'bg-pink-500' },
     { id: 'video', name: 'Video', icon: <Video size={32} />, color: 'bg-red-500' },
     { id: 'photos', name: 'Photos', icon: <ImageIcon size={32} />, color: 'bg-amber-500' },
-    { id: 'settings', name: 'Settings', icon: <Settings size={32} />, color: 'bg-slate-500' },
+    { id: 'settings', name: 'Settings', icon: <Settings size={32} />, color: 'bg-slate-500', action: () => setActiveModal('settings') },
   ];
 
   const stats: SystemStat[] = [
@@ -271,7 +391,7 @@ export default function App() {
       <div className="min-h-screen bg-[#0a0a0a] text-white font-sans selection:bg-blue-500/30 overflow-hidden relative flex items-center justify-center">
         <div 
           className="absolute inset-0 bg-cover bg-center bg-no-repeat opacity-40 scale-105 blur-sm"
-          style={{ backgroundImage: 'url(https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=2564&auto=format&fit=crop)' }}
+          style={{ backgroundImage: `url(${wallpaperUrl})` }}
         />
         <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/60" />
         
@@ -331,7 +451,7 @@ export default function App() {
       {/* Background Wallpaper with Overlay */}
       <div 
         className="absolute inset-0 bg-cover bg-center bg-no-repeat opacity-40 scale-105 blur-sm"
-        style={{ backgroundImage: 'url(https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=2564&auto=format&fit=crop)' }}
+        style={{ backgroundImage: `url(${wallpaperUrl})` }}
       />
       <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/60" />
 
@@ -393,31 +513,91 @@ export default function App() {
             <div className="space-y-4">
               <h2 className="text-xs font-bold uppercase tracking-widest text-white/40 px-1">System Status</h2>
               <div className="grid grid-cols-1 gap-4">
-                {stats.map((stat) => (
-                  <motion.div 
-                    key={stat.label}
-                    whileHover={{ scale: 1.02 }}
-                    className="p-4 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-xl flex items-center justify-between"
-                  >
+                {/* CPU */}
+                <motion.div 
+                  whileHover={{ scale: 1.02 }}
+                  className="p-4 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-xl flex flex-col gap-3"
+                >
+                  <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <div className="p-2 bg-white/5 rounded-lg text-blue-400">
-                        {stat.icon}
+                        <Cpu size={18} />
                       </div>
                       <div>
-                        <p className="text-xs text-white/40 font-medium">{stat.label}</p>
-                        <p className="text-lg font-bold">{stat.value}{stat.unit}</p>
+                        <p className="text-xs text-white/40 font-medium">CPU ({systemStats.cpu.cores} Cores)</p>
+                        <p className="text-lg font-bold">{systemStats.cpu.usage}%</p>
                       </div>
                     </div>
-                    <div className="w-16 h-1 bg-white/10 rounded-full overflow-hidden">
-                      <motion.div 
-                        initial={{ width: 0 }}
-                        animate={{ width: `${stat.value}%` }}
-                        transition={{ duration: 1, ease: "easeOut" }}
-                        className="h-full bg-blue-500"
-                      />
+                    <div className="text-right">
+                      <p className="text-[10px] text-white/30 truncate max-w-[100px]" title={systemStats.cpu.brand}>{systemStats.cpu.brand}</p>
+                      <p className="text-[10px] text-white/30">{systemStats.cpu.speed} GHz</p>
                     </div>
-                  </motion.div>
-                ))}
+                  </div>
+                  <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden">
+                    <motion.div 
+                      initial={{ width: 0 }}
+                      animate={{ width: `${systemStats.cpu.usage}%` }}
+                      transition={{ duration: 1, ease: "easeOut" }}
+                      className="h-full bg-blue-500"
+                    />
+                  </div>
+                </motion.div>
+
+                {/* RAM */}
+                <motion.div 
+                  whileHover={{ scale: 1.02 }}
+                  className="p-4 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-xl flex flex-col gap-3"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 bg-white/5 rounded-lg text-emerald-400">
+                        <Activity size={18} />
+                      </div>
+                      <div>
+                        <p className="text-xs text-white/40 font-medium">RAM</p>
+                        <p className="text-lg font-bold">{systemStats.ram.usagePercent}%</p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[10px] text-white/30">{systemStats.ram.usedGB} GB Used</p>
+                      <p className="text-[10px] text-white/30">{systemStats.ram.totalGB} GB Total</p>
+                    </div>
+                  </div>
+                  <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden">
+                    <motion.div 
+                      initial={{ width: 0 }}
+                      animate={{ width: `${systemStats.ram.usagePercent}%` }}
+                      transition={{ duration: 1, ease: "easeOut" }}
+                      className="h-full bg-emerald-500"
+                    />
+                  </div>
+                </motion.div>
+                
+                {/* OS Info */}
+                <motion.div 
+                  whileHover={{ scale: 1.02 }}
+                  className="p-4 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-xl flex flex-col gap-3"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 bg-white/5 rounded-lg text-purple-400">
+                        <Server size={18} />
+                      </div>
+                      <div>
+                        <p className="text-xs text-white/40 font-medium">OS</p>
+                        <p className="text-sm font-bold truncate max-w-[120px]" title={`${systemStats.os.distro} ${systemStats.os.release}`}>
+                          {systemStats.os.distro}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[10px] text-white/30">Uptime</p>
+                      <p className="text-[10px] text-white/30 font-mono">
+                        {Math.floor(systemStats.os.uptime / 3600)}h {Math.floor((systemStats.os.uptime % 3600) / 60)}m
+                      </p>
+                    </div>
+                  </div>
+                </motion.div>
               </div>
             </div>
 
@@ -447,18 +627,18 @@ export default function App() {
                     fill="transparent"
                     strokeDasharray={251.2}
                     initial={{ strokeDashoffset: 251.2 }}
-                    animate={{ strokeDashoffset: 251.2 - (251.2 * systemStats.disk) / 100 }}
+                    animate={{ strokeDashoffset: 251.2 - (251.2 * systemStats.disk.usagePercent) / 100 }}
                     transition={{ duration: 1.5, ease: "easeInOut" }}
                     className="text-blue-500"
                   />
                 </svg>
                 <div className="absolute inset-0 flex flex-col items-center justify-center">
-                  <span className="text-xl font-bold">{systemStats.disk}%</span>
+                  <span className="text-xl font-bold">{systemStats.disk.usagePercent}%</span>
                   <span className="text-[10px] text-white/40 uppercase">Used</span>
                 </div>
               </div>
               <div className="mt-4 text-center">
-                <p className="text-sm text-white/60">{systemStats.diskDetails.used} GB of {systemStats.diskDetails.total} GB used</p>
+                <p className="text-sm text-white/60">{systemStats.disk.usedGB} GB of {systemStats.disk.totalGB} GB used</p>
               </div>
             </div>
           </div>
@@ -535,7 +715,9 @@ export default function App() {
               {/* Modal Header */}
               <div className="flex items-center justify-between px-6 py-4 border-b border-white/5 bg-white/5">
                 <div className="flex items-center gap-3">
-                  {activeModal === 'files' ? <FolderOpen className="text-blue-400" /> : <TerminalIcon className="text-emerald-400" />}
+                  {activeModal === 'files' ? <FolderOpen className="text-blue-400" /> : 
+                   activeModal === 'settings' ? <Settings className="text-slate-400" /> :
+                   <TerminalIcon className="text-emerald-400" />}
                   <span className="font-bold capitalize">{activeModal}</span>
                 </div>
                 <button 
@@ -548,7 +730,72 @@ export default function App() {
 
               {/* Modal Content */}
               <div className="flex-1 overflow-hidden">
-                {activeModal === 'files' ? (
+                {activeModal === 'settings' ? (
+                  <div className="h-full p-6 text-white overflow-y-auto">
+                    <h3 className="text-xl font-bold mb-6">Dashboard Settings</h3>
+                    <div className="space-y-8 max-w-md">
+                      <div className="bg-white/5 p-6 rounded-2xl border border-white/10">
+                        <h4 className="text-sm font-bold text-white/80 mb-4 flex items-center gap-2">
+                          <ImageIcon size={16} /> Custom Wallpaper
+                        </h4>
+                        
+                        <div className="space-y-4">
+                          <div>
+                            <label className="block text-xs text-white/60 mb-2 uppercase tracking-wider">
+                              Upload Image
+                            </label>
+                            <input 
+                              type="file" 
+                              accept="image/*" 
+                              onChange={handleWallpaperUpload}
+                              className="block w-full text-sm text-white/60 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-500 transition-all cursor-pointer"
+                            />
+                          </div>
+
+                          <div className="relative flex items-center gap-2">
+                            <div className="flex-grow border-t border-white/10"></div>
+                            <span className="text-xs text-white/40 uppercase">OR</span>
+                            <div className="flex-grow border-t border-white/10"></div>
+                          </div>
+
+                          <div>
+                            <label className="block text-xs text-white/60 mb-2 uppercase tracking-wider">
+                              Image URL
+                            </label>
+                            <div className="flex gap-2">
+                              <input 
+                                type="text" 
+                                placeholder="https://..."
+                                value={wallpaperInputUrl}
+                                onChange={(e) => setWallpaperInputUrl(e.target.value)}
+                                className="flex-1 bg-black/20 border border-white/10 rounded-xl py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                              />
+                              <button 
+                                onClick={handleSetWallpaperUrl}
+                                className="bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-xl text-sm font-medium transition-colors"
+                              >
+                                Set
+                              </button>
+                            </div>
+                          </div>
+
+                          {wallpaperError && (
+                            <p className={`text-sm ${wallpaperError.includes('success') || wallpaperError.includes('updated') || wallpaperError.includes('reset') ? 'text-emerald-400' : 'text-red-400'}`}>
+                              {wallpaperError}
+                            </p>
+                          )}
+
+                          <button 
+                            onClick={handleResetWallpaper}
+                            className="w-full mt-2 bg-white/5 hover:bg-white/10 text-white/80 px-4 py-2 rounded-xl text-sm font-medium transition-colors border border-white/10"
+                          >
+                            Reset to Default Wallpaper
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : activeModal === 'files' ? (
                   <div className="h-full flex flex-col">
                     <div className="px-6 py-3 bg-black/20 flex items-center gap-2 text-sm text-white/40">
                       <button onClick={() => fetchFiles(path.dirname(currentPath))} className="hover:text-white"><ChevronLeft size={16} /></button>
@@ -617,7 +864,7 @@ export default function App() {
           <button onClick={() => setActiveModal('terminal')} className="p-2 hover:bg-white/10 rounded-xl transition-all">
             <TerminalIcon size={24} />
           </button>
-          <button className="p-2 hover:bg-white/10 rounded-xl transition-all">
+          <button onClick={() => setActiveModal('settings')} className="p-2 hover:bg-white/10 rounded-xl transition-all">
             <Settings size={24} />
           </button>
         </div>
