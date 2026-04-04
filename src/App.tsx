@@ -78,7 +78,32 @@ export default function App() {
   const [terminalInput, setTerminalInput] = useState('');
   const terminalEndRef = useRef<HTMLDivElement>(null);
 
+  // Auth States
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+  const [loginUsername, setLoginUsername] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [loginError, setLoginError] = useState('');
+
   useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        const response = await fetch('/api/check-auth');
+        if (response.ok) {
+          setIsAuthenticated(true);
+        }
+      } catch (error) {
+        console.error("Auth check failed:", error);
+      } finally {
+        setIsCheckingAuth(false);
+      }
+    };
+    checkAuth();
+  }, []);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     
     const fetchStats = async () => {
@@ -100,13 +125,42 @@ export default function App() {
       clearInterval(timer);
       clearInterval(statsInterval);
     };
-  }, []);
+  }, [isAuthenticated]);
 
   useEffect(() => {
     if (terminalEndRef.current) {
       terminalEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   }, [terminalOutput]);
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginError('');
+    try {
+      const response = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: loginUsername, password: loginPassword })
+      });
+      const data = await response.json();
+      if (response.ok && data.success) {
+        setIsAuthenticated(true);
+      } else {
+        setLoginError(data.error || 'Login failed');
+      }
+    } catch (error) {
+      setLoginError('Network error');
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/logout', { method: 'POST' });
+      setIsAuthenticated(false);
+    } catch (error) {
+      console.error("Logout failed:", error);
+    }
+  };
 
   const fetchFiles = async (path: string = '') => {
     try {
@@ -165,6 +219,70 @@ export default function App() {
     app.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  if (isCheckingAuth) {
+    return <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center text-white">Loading...</div>;
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-[#0a0a0a] text-white font-sans selection:bg-blue-500/30 overflow-hidden relative flex items-center justify-center">
+        <div 
+          className="absolute inset-0 bg-cover bg-center bg-no-repeat opacity-40 scale-105 blur-sm"
+          style={{ backgroundImage: 'url(https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=2564&auto=format&fit=crop)' }}
+        />
+        <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/60" />
+        
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="relative z-10 w-full max-w-md p-8 rounded-3xl bg-black/40 backdrop-blur-2xl border border-white/10 shadow-2xl"
+        >
+          <div className="flex flex-col items-center mb-8">
+            <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-500/20 mb-4">
+              <LayoutGrid size={32} />
+            </div>
+            <h1 className="text-2xl font-bold tracking-tight">Welcome to CasaDash</h1>
+            <p className="text-sm text-white/60 mt-2 text-center">Enter your server's OS credentials to continue.</p>
+          </div>
+
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div>
+              <input 
+                type="text" 
+                placeholder="Username"
+                value={loginUsername}
+                onChange={(e) => setLoginUsername(e.target.value)}
+                className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-all"
+                required
+              />
+            </div>
+            <div>
+              <input 
+                type="password" 
+                placeholder="Password"
+                value={loginPassword}
+                onChange={(e) => setLoginPassword(e.target.value)}
+                className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-all"
+                required
+              />
+            </div>
+            
+            {loginError && (
+              <p className="text-red-400 text-sm text-center">{loginError}</p>
+            )}
+
+            <button 
+              type="submit"
+              className="w-full bg-blue-600 hover:bg-blue-500 text-white font-medium py-3 rounded-xl transition-colors shadow-lg shadow-blue-500/20 mt-4"
+            >
+              Log In
+            </button>
+          </form>
+        </motion.div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white font-sans selection:bg-blue-500/30 overflow-hidden relative">
       {/* Background Wallpaper with Overlay */}
@@ -203,7 +321,7 @@ export default function App() {
             <button className="p-2 hover:bg-white/10 rounded-full transition-colors">
               <Bell size={20} />
             </button>
-            <button className="p-2 hover:bg-white/10 rounded-full transition-colors text-red-400">
+            <button onClick={handleLogout} className="p-2 hover:bg-white/10 rounded-full transition-colors text-red-400">
               <Power size={20} />
             </button>
           </div>
