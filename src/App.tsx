@@ -29,6 +29,7 @@ import {
   ChevronLeft
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import Fuse, { FuseResultMatch } from 'fuse.js';
 
 // Types
 interface AppIcon {
@@ -37,6 +38,10 @@ interface AppIcon {
   icon: React.ReactNode;
   color: string;
   action?: () => void;
+}
+
+interface AppIconWithMatches extends AppIcon {
+  matches?: readonly FuseResultMatch[];
 }
 
 interface SystemStat {
@@ -57,6 +62,35 @@ interface FileItem {
 const path = {
   dirname: (p: string) => p.split('/').slice(0, -1).join('/') || '/',
   join: (...parts: string[]) => parts.join('/').replace(/\/+/g, '/')
+};
+
+// Helper component for highlighting fuzzy search matches
+const HighlightedText = ({ text, matches }: { text: string, matches?: readonly FuseResultMatch[] }) => {
+  if (!matches || matches.length === 0) return <>{text}</>;
+  
+  const match = matches.find(m => m.key === 'name');
+  if (!match || !match.indices || match.indices.length === 0) return <>{text}</>;
+
+  let lastIndex = 0;
+  const elements: React.ReactNode[] = [];
+
+  match.indices.forEach(([start, end], i) => {
+    if (start > lastIndex) {
+      elements.push(<span key={`text-${i}`}>{text.slice(lastIndex, start)}</span>);
+    }
+    elements.push(
+      <span key={`match-${i}`} className="text-blue-400 bg-blue-400/20 rounded px-[2px] font-bold">
+        {text.slice(start, end + 1)}
+      </span>
+    );
+    lastIndex = end + 1;
+  });
+
+  if (lastIndex < text.length) {
+    elements.push(<span key={`text-end`}>{text.slice(lastIndex)}</span>);
+  }
+
+  return <>{elements}</>;
 };
 
 export default function App() {
@@ -215,9 +249,18 @@ export default function App() {
     { label: 'Disk', value: systemStats.disk, icon: <HardDrive size={18} />, unit: '%' },
   ];
 
-  const filteredApps = apps.filter(app => 
-    app.name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const fuse = new Fuse(apps, {
+    keys: ['name'],
+    includeMatches: true,
+    threshold: 0.4,
+  });
+
+  const filteredApps: AppIconWithMatches[] = searchQuery
+    ? fuse.search(searchQuery).map(result => ({
+        ...result.item,
+        matches: result.matches
+      }))
+    : apps;
 
   if (isCheckingAuth) {
     return <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center text-white">Loading...</div>;
@@ -451,7 +494,7 @@ export default function App() {
                       {app.icon}
                     </div>
                     <span className="text-sm font-medium text-white/80 group-hover:text-white transition-colors">
-                      {app.name}
+                      <HighlightedText text={app.name} matches={app.matches} />
                     </span>
                   </motion.div>
                 ))}
