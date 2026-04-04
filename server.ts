@@ -104,22 +104,30 @@ async function startServer() {
     res.json({ success: true });
   });
 
+  // Cache static system info
+  let cachedCpuInfo: any = null;
+  let cachedOsInfo: any = null;
+
   // API Route for real system stats
   app.get("/api/stats", requireAuth, async (req, res) => {
     try {
-      const cpuLoad = await si.currentLoad();
-      const cpu = await si.cpu();
-      const mem = await si.mem();
-      const fsStats = await si.fsSize();
-      const osInfo = await si.osInfo();
+      if (!cachedCpuInfo) cachedCpuInfo = await si.cpu();
+      if (!cachedOsInfo) cachedOsInfo = await si.osInfo();
+
+      const [cpuLoad, mem, fsStats] = await Promise.all([
+        si.currentLoad(),
+        si.mem(),
+        si.fsSize()
+      ]);
+      
       const mainDisk = fsStats[0] || { use: 0, used: 0, size: 0 };
 
       res.json({
         cpu: {
           usage: Math.round(cpuLoad.currentLoad),
-          cores: cpu.cores,
-          brand: cpu.brand || 'Unknown CPU',
-          speed: cpu.speed
+          cores: cachedCpuInfo.cores,
+          brand: cachedCpuInfo.brand || 'Unknown CPU',
+          speed: cachedCpuInfo.speed
         },
         ram: {
           usagePercent: Math.round((mem.active / mem.total) * 100),
@@ -132,13 +140,14 @@ async function startServer() {
           totalGB: (mainDisk.size / 1024 / 1024 / 1024).toFixed(1)
         },
         os: {
-          distro: osInfo.distro || 'Unknown OS',
-          release: osInfo.release || '',
+          distro: cachedOsInfo.distro || 'Unknown OS',
+          release: cachedOsInfo.release || '',
           uptime: os.uptime(),
           hostname: os.hostname()
         }
       });
     } catch (error) {
+      console.error("Stats error:", error);
       res.status(500).json({ error: "Failed to fetch system stats" });
     }
   });

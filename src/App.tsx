@@ -130,7 +130,7 @@ export default function App() {
   useEffect(() => {
     const checkAuth = async () => {
       try {
-        const response = await fetch('/api/check-auth');
+        const response = await fetch('/api/check-auth', { credentials: 'include' });
         if (response.ok) {
           setIsAuthenticated(true);
         }
@@ -150,7 +150,7 @@ export default function App() {
     
     const fetchStats = async () => {
       try {
-        const response = await fetch('/api/stats');
+        const response = await fetch('/api/stats', { credentials: 'include' });
         if (response.ok) {
           const data = await response.json();
           setSystemStats(data);
@@ -182,6 +182,7 @@ export default function App() {
       const response = await fetch('/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ username: loginUsername, password: loginPassword })
       });
       const data = await response.json();
@@ -197,7 +198,7 @@ export default function App() {
 
   const handleLogout = async () => {
     try {
-      await fetch('/api/logout', { method: 'POST' });
+      await fetch('/api/logout', { method: 'POST', credentials: 'include' });
       setIsAuthenticated(false);
     } catch (error) {
       console.error("Logout failed:", error);
@@ -206,7 +207,7 @@ export default function App() {
 
   const fetchFiles = async (path: string = '') => {
     try {
-      const response = await fetch(`/api/files?path=${encodeURIComponent(path)}`);
+      const response = await fetch(`/api/files?path=${encodeURIComponent(path)}`, { credentials: 'include' });
       if (response.ok) {
         const data = await response.json();
         setFiles(data.files);
@@ -229,6 +230,7 @@ export default function App() {
       const response = await fetch('/api/terminal', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ command: cmd, cwd: currentPath })
       });
       const data = await response.json();
@@ -304,6 +306,7 @@ export default function App() {
       const response = await fetch('/api/upload-wallpaper', {
         method: 'POST',
         body: formData,
+        credentials: 'include'
       });
       
       if (response.ok) {
