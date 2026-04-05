@@ -190,15 +190,56 @@ async function startServer() {
     const targetPath = (req.query.path as string) || os.homedir();
     try {
       const files = await fs.readdir(targetPath, { withFileTypes: true });
-      const result = files.map(file => ({
-        name: file.name,
-        isDirectory: file.isDirectory(),
-        size: 0, // Simplified
-        modified: new Date()
+      const result = await Promise.all(files.map(async file => {
+        const filePath = path.join(targetPath, file.name);
+        let size = 0;
+        let modified = new Date();
+        let mode = 0;
+        try {
+          const stats = await fs.stat(filePath);
+          size = stats.size;
+          modified = stats.mtime;
+          mode = stats.mode;
+        } catch (e) {
+          // ignore
+        }
+        
+        // Convert mode to permissions string
+        const permissions = [
+          file.isDirectory() ? 'd' : '-',
+          (mode & 0o400) ? 'r' : '-',
+          (mode & 0o200) ? 'w' : '-',
+          (mode & 0o100) ? 'x' : '-',
+          (mode & 0o040) ? 'r' : '-',
+          (mode & 0o020) ? 'w' : '-',
+          (mode & 0o010) ? 'x' : '-',
+          (mode & 0o004) ? 'r' : '-',
+          (mode & 0o002) ? 'w' : '-',
+          (mode & 0o001) ? 'x' : '-'
+        ].join('');
+
+        return {
+          name: file.name,
+          isDirectory: file.isDirectory(),
+          size,
+          modified,
+          permissions
+        };
       }));
       res.json({ path: targetPath, files: result });
     } catch (error) {
       res.status(500).json({ error: "Failed to read directory" });
+    }
+  });
+
+  // Change File Permissions API
+  app.post("/api/files/permissions", requireAuth, async (req, res) => {
+    const { filePath, mode } = req.body;
+    try {
+      await fs.chmod(filePath, parseInt(mode, 8));
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: "Failed to change permissions", details: error.message });
     }
   });
 

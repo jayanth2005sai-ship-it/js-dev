@@ -58,6 +58,7 @@ interface FileItem {
   isDirectory: boolean;
   size: number;
   modified: string;
+  permissions: string;
 }
 
 // Path helpers for frontend
@@ -109,6 +110,8 @@ export default function App() {
   const [activeModal, setActiveModal] = useState<string | null>(null);
   const [currentPath, setCurrentPath] = useState('');
   const [files, setFiles] = useState<FileItem[]>([]);
+  const [editingPermissionsFile, setEditingPermissionsFile] = useState<FileItem | null>(null);
+  const [newPermissions, setNewPermissions] = useState('');
   const [terminalOutput, setTerminalOutput] = useState<string[]>(['Welcome to CasaDash Terminal', 'Type "help" for a list of commands.']);
   const [terminalInput, setTerminalInput] = useState('');
   const terminalEndRef = useRef<HTMLDivElement>(null);
@@ -242,6 +245,32 @@ export default function App() {
       }
     } catch (error) {
       console.error("Failed to fetch files:", error);
+    }
+  };
+
+  const handlePermissionsChange = async () => {
+    if (!editingPermissionsFile) return;
+    try {
+      const response = await fetch('/api/files/permissions', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          ...getAuthHeaders()
+        },
+        credentials: 'include',
+        body: JSON.stringify({ 
+          filePath: path.join(currentPath, editingPermissionsFile.name), 
+          mode: newPermissions 
+        })
+      });
+      if (response.ok) {
+        setEditingPermissionsFile(null);
+        fetchFiles(currentPath);
+      } else {
+        console.error("Failed to change permissions");
+      }
+    } catch (error) {
+      console.error("Error changing permissions:", error);
     }
   };
 
@@ -835,7 +864,7 @@ export default function App() {
                       <button onClick={() => fetchFiles(path.dirname(currentPath))} className="hover:text-white"><ChevronLeft size={16} /></button>
                       <span className="font-mono truncate">{currentPath}</span>
                     </div>
-                    <div className="flex-1 overflow-y-auto p-4 grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-4">
+                    <div className="flex-1 overflow-y-auto p-4 grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-4 relative">
                       {files.map((file) => (
                         <div 
                           key={file.name}
@@ -848,8 +877,63 @@ export default function App() {
                             <File size={48} className="text-white/20 group-hover:scale-110 transition-transform" />
                           )}
                           <span className="text-xs text-center truncate w-full">{file.name}</span>
+                          <div 
+                            className="text-[10px] text-white/40 font-mono hover:text-white transition-colors flex items-center gap-1"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditingPermissionsFile(file);
+                              let octal = 0;
+                              const p = file.permissions;
+                              if (p[1] === 'r') octal += 400;
+                              if (p[2] === 'w') octal += 200;
+                              if (p[3] === 'x') octal += 100;
+                              if (p[4] === 'r') octal += 40;
+                              if (p[5] === 'w') octal += 20;
+                              if (p[6] === 'x') octal += 10;
+                              if (p[7] === 'r') octal += 4;
+                              if (p[8] === 'w') octal += 2;
+                              if (p[9] === 'x') octal += 1;
+                              setNewPermissions(octal.toString(8).padStart(3, '0'));
+                            }}
+                          >
+                            {file.permissions}
+                          </div>
                         </div>
                       ))}
+                      
+                      {editingPermissionsFile && (
+                        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
+                          <div className="bg-[#1a1a1a] p-6 rounded-2xl border border-white/10 w-80 shadow-2xl">
+                            <h3 className="text-lg font-bold mb-4">Edit Permissions</h3>
+                            <p className="text-sm text-white/60 mb-4 truncate">File: {editingPermissionsFile.name}</p>
+                            <div className="mb-6">
+                              <label className="block text-xs text-white/60 mb-2 uppercase tracking-wider">
+                                Octal Mode (e.g. 755)
+                              </label>
+                              <input 
+                                type="text" 
+                                value={newPermissions}
+                                onChange={(e) => setNewPermissions(e.target.value)}
+                                className="w-full bg-black/20 border border-white/10 rounded-xl py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-500/50 font-mono"
+                              />
+                            </div>
+                            <div className="flex justify-end gap-3">
+                              <button 
+                                onClick={() => setEditingPermissionsFile(null)}
+                                className="px-4 py-2 rounded-xl text-sm font-medium hover:bg-white/5 transition-colors"
+                              >
+                                Cancel
+                              </button>
+                              <button 
+                                onClick={handlePermissionsChange}
+                                className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-xl text-sm font-medium transition-colors"
+                              >
+                                Save
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 ) : (
