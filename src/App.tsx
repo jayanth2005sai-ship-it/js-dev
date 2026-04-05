@@ -128,10 +128,19 @@ export default function App() {
   const [wallpaperError, setWallpaperError] = useState('');
   const [wallpaperInputUrl, setWallpaperInputUrl] = useState('');
 
+  // Helper to get auth headers
+  const getAuthHeaders = () => {
+    const token = localStorage.getItem('auth_token');
+    return token ? { 'Authorization': `Bearer ${token}` } : {};
+  };
+
   useEffect(() => {
     const checkAuth = async () => {
       try {
-        const response = await fetch('/api/check-auth', { credentials: 'include' });
+        const response = await fetch('/api/check-auth', { 
+          credentials: 'include',
+          headers: { ...getAuthHeaders() }
+        });
         if (response.ok) {
           setIsAuthenticated(true);
         }
@@ -151,10 +160,16 @@ export default function App() {
     
     const fetchStats = async () => {
       try {
-        const response = await fetch('/api/stats', { credentials: 'include' });
+        const response = await fetch('/api/stats', { 
+          credentials: 'include',
+          headers: { ...getAuthHeaders() }
+        });
         if (response.ok) {
           const data = await response.json();
           setSystemStats(data);
+        } else {
+          const errData = await response.json();
+          console.error("Stats API error:", errData);
         }
       } catch (error) {
         console.error("Failed to fetch stats:", error);
@@ -188,6 +203,9 @@ export default function App() {
       });
       const data = await response.json();
       if (response.ok && data.success) {
+        if (data.token) {
+          localStorage.setItem('auth_token', data.token);
+        }
         setIsAuthenticated(true);
       } else {
         setLoginError(data.error || 'Login failed');
@@ -199,7 +217,12 @@ export default function App() {
 
   const handleLogout = async () => {
     try {
-      await fetch('/api/logout', { method: 'POST', credentials: 'include' });
+      await fetch('/api/logout', { 
+        method: 'POST', 
+        credentials: 'include',
+        headers: { ...getAuthHeaders() }
+      });
+      localStorage.removeItem('auth_token');
       setIsAuthenticated(false);
     } catch (error) {
       console.error("Logout failed:", error);
@@ -208,7 +231,10 @@ export default function App() {
 
   const fetchFiles = async (path: string = '') => {
     try {
-      const response = await fetch(`/api/files?path=${encodeURIComponent(path)}`, { credentials: 'include' });
+      const response = await fetch(`/api/files?path=${encodeURIComponent(path)}`, { 
+        credentials: 'include',
+        headers: { ...getAuthHeaders() }
+      });
       if (response.ok) {
         const data = await response.json();
         setFiles(data.files);
@@ -230,7 +256,10 @@ export default function App() {
     try {
       const response = await fetch('/api/terminal', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          ...getAuthHeaders()
+        },
         credentials: 'include',
         body: JSON.stringify({ command: cmd, cwd: currentPath })
       });
@@ -307,7 +336,8 @@ export default function App() {
       const response = await fetch('/api/upload-wallpaper', {
         method: 'POST',
         body: formData,
-        credentials: 'include'
+        credentials: 'include',
+        headers: { ...getAuthHeaders() }
       });
       
       if (response.ok) {

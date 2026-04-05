@@ -41,7 +41,14 @@ async function startServer() {
 
   // Authentication Middleware
   const requireAuth = (req: express.Request, res: express.Response, next: express.NextFunction) => {
-    const token = req.cookies.auth_token;
+    let token = req.cookies.auth_token;
+    
+    // Also check Authorization header for Bearer token
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      token = authHeader.substring(7);
+    }
+
     if (!token) {
       res.status(401).json({ error: "Unauthorized" });
       return;
@@ -66,7 +73,7 @@ async function startServer() {
     if (isPreview && username === 'admin' && password === 'admin') {
       const token = jwt.sign({ username }, JWT_SECRET, { expiresIn: '24h' });
       res.cookie('auth_token', token, { httpOnly: true, sameSite: 'none', secure: true });
-      res.json({ success: true });
+      res.json({ success: true, token });
       return;
     }
 
@@ -76,13 +83,13 @@ async function startServer() {
       conn.end();
       const token = jwt.sign({ username }, JWT_SECRET, { expiresIn: '24h' });
       res.cookie('auth_token', token, { httpOnly: true, sameSite: 'none', secure: true });
-      res.json({ success: true });
+      res.json({ success: true, token });
     }).on('error', (err: any) => {
       // If connection refused (no SSH server), and they tried admin/admin, let them in
       if (err.code === 'ECONNREFUSED' && username === 'admin' && password === 'admin') {
         const token = jwt.sign({ username }, JWT_SECRET, { expiresIn: '24h' });
         res.cookie('auth_token', token, { httpOnly: true, sameSite: 'none', secure: true });
-        res.json({ success: true });
+        res.json({ success: true, token });
         return;
       }
       res.status(401).json({ error: "Invalid OS credentials. (Hint: use admin/admin)" });
@@ -105,50 +112,76 @@ async function startServer() {
   });
 
   // Cache static system info
-  let cachedCpuInfo: any = null;
-  let cachedOsInfo: any = null;
+  let lastCpu = getCpuUsage();
+
+  function getCpuUsage() {
+    const cpus = os.cpus();
+    let totalIdle = 0, totalTick = 0;
+    for (const cpu of cpus) {
+      for (const type in cpu.times) {
+        totalTick += cpu.times[type as keyof typeof cpu.times];
+      }
+      totalIdle += cpu.times.idle;
+    }
+    return { idle: totalIdle, total: totalTick };
+  }
 
   // API Route for real system stats
   app.get("/api/stats", requireAuth, async (req, res) => {
     try {
-      if (!cachedCpuInfo) cachedCpuInfo = await si.cpu();
-      if (!cachedOsInfo) cachedOsInfo = await si.osInfo();
+      const currentCpu = getCpuUsage();
+      const idleDifference = currentCpu.idle - lastCpu.idle;
+      const totalDifference = currentCpu.total - lastCpu.total;
+      const cpuUsage = totalDifference === 0 ? 0 : 100 - ~~(100 * idleDifference / totalDifference);
+      lastCpu = currentCpu;
 
-      const [cpuLoad, mem, fsStats] = await Promise.all([
-        si.currentLoad(),
-        si.mem(),
-        si.fsSize()
-      ]);
-      
-      const mainDisk = fsStats[0] || { use: 0, used: 0, size: 0 };
+      const totalMem = os.totalmem();
+      const freeMem = os.freemem();
+      const usedMem = totalMem - freeMem;
+      const memUsagePercent = Math.round((usedMem / totalMem) * 100);
+
+      let diskUsagePercent = 0;
+      let diskUsedGB = "0.0";
+      let diskTotalGB = "0.0";
+      try {
+        const fsStats = await si.fsSize();
+        const mainDisk = fsStats[0] || { use: 0, used: 0, size: 0 };
+        diskUsagePercent = Math.round(mainDisk.use);
+        diskUsedGB = (mainDisk.used / 1024 / 1024 / 1024).toFixed(1);
+        diskTotalGB = (mainDisk.size / 1024 / 1024 / 1024).toFixed(1);
+      } catch (e) {
+        // Ignore disk error
+      }
+
+      const cpus = os.cpus();
 
       res.json({
         cpu: {
-          usage: Math.round(cpuLoad.currentLoad),
-          cores: cachedCpuInfo.cores,
-          brand: cachedCpuInfo.brand || 'Unknown CPU',
-          speed: cachedCpuInfo.speed
+          usage: cpuUsage,
+          cores: cpus.length,
+          brand: cpus[0]?.model || 'Unknown CPU',
+          speed: (cpus[0]?.speed / 1000).toFixed(2)
         },
         ram: {
-          usagePercent: Math.round((mem.active / mem.total) * 100),
-          usedGB: (mem.active / 1024 / 1024 / 1024).toFixed(1),
-          totalGB: (mem.total / 1024 / 1024 / 1024).toFixed(1)
+          usagePercent: memUsagePercent,
+          usedGB: (usedMem / 1024 / 1024 / 1024).toFixed(1),
+          totalGB: (totalMem / 1024 / 1024 / 1024).toFixed(1)
         },
         disk: {
-          usagePercent: Math.round(mainDisk.use),
-          usedGB: (mainDisk.used / 1024 / 1024 / 1024).toFixed(1),
-          totalGB: (mainDisk.size / 1024 / 1024 / 1024).toFixed(1)
+          usagePercent: diskUsagePercent,
+          usedGB: diskUsedGB,
+          totalGB: diskTotalGB
         },
         os: {
-          distro: cachedOsInfo.distro || 'Unknown OS',
-          release: cachedOsInfo.release || '',
+          distro: os.type(),
+          release: os.release(),
           uptime: os.uptime(),
           hostname: os.hostname()
         }
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error("Stats error:", error);
-      res.status(500).json({ error: "Failed to fetch system stats" });
+      res.status(500).json({ error: "Failed to fetch system stats", details: error.message || String(error) });
     }
   });
 
