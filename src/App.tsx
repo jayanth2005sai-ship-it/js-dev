@@ -27,7 +27,8 @@ import {
   ChevronRight,
   File,
   ChevronLeft,
-  Server
+  Server,
+  Home
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Fuse, { FuseResultMatch } from 'fuse.js';
@@ -463,9 +464,9 @@ export default function App() {
         <div className="flex items-center gap-6">
           <div className="flex items-center gap-2 font-bold text-xl tracking-tight">
             <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center shadow-lg shadow-blue-500/20">
-              <LayoutGrid size={18} />
+              <Home size={18} className="text-white" />
             </div>
-            <span>{systemStats.hostname}</span>
+            <span>CasaDash</span>
           </div>
           
           <div className="hidden md:flex items-center gap-4 text-sm font-medium text-white/60">
