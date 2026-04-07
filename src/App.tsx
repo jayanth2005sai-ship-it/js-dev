@@ -28,7 +28,11 @@ import {
   File,
   ChevronLeft,
   Server,
-  Home
+  Home,
+  Upload,
+  FolderPlus,
+  List,
+  Grid
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Fuse, { FuseResultMatch } from 'fuse.js';
@@ -110,8 +114,14 @@ export default function App() {
   const [activeModal, setActiveModal] = useState<string | null>(null);
   const [currentPath, setCurrentPath] = useState('');
   const [files, setFiles] = useState<FileItem[]>([]);
+  const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
+  const [isSelectMode, setIsSelectMode] = useState(false);
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [isCreatingFolder, setIsCreatingFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
   const [editingPermissionsFile, setEditingPermissionsFile] = useState<FileItem | null>(null);
   const [newPermissions, setNewPermissions] = useState('');
+  const [fileError, setFileError] = useState<string | null>(null);
   const [terminalOutput, setTerminalOutput] = useState<string[]>(['Welcome to CasaDash Terminal', 'Type "help" for a list of commands.']);
   const [terminalInput, setTerminalInput] = useState('');
   const terminalEndRef = useRef<HTMLDivElement>(null);
@@ -233,6 +243,7 @@ export default function App() {
   };
 
   const fetchFiles = async (path: string = '') => {
+    setFileError(null);
     try {
       const response = await fetch(`/api/files?path=${encodeURIComponent(path)}`, { 
         credentials: 'include',
@@ -242,14 +253,126 @@ export default function App() {
         const data = await response.json();
         setFiles(data.files);
         setCurrentPath(data.path);
+        setSelectedFiles(new Set()); // Clear selection on navigate
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        setFileError(errorData.error || "Failed to fetch files. Permission denied or path does not exist.");
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Failed to fetch files:", error);
+      setFileError(error.message || "Network error while fetching files.");
+    }
+  };
+
+  const handleDownloadSelected = async () => {
+    if (selectedFiles.size === 0) return;
+    setFileError(null);
+    
+    const filePaths = Array.from(selectedFiles).map((name: string) => path.join(currentPath, name));
+    
+    try {
+      const response = await fetch('/api/files/download', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          ...getAuthHeaders()
+        },
+        credentials: 'include',
+        body: JSON.stringify({ files: filePaths })
+      });
+      
+      if (response.ok) {
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'download.zip';
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        
+        // Reset selection
+        setSelectedFiles(new Set());
+        setIsSelectMode(false);
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        setFileError(errorData.error || "Failed to download selected files.");
+      }
+    } catch (error: any) {
+      console.error("Error downloading files:", error);
+      setFileError(error.message || "Network error while downloading files.");
+    }
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || e.target.files.length === 0) return;
+    setFileError(null);
+    
+    const formData = new FormData();
+    for (let i = 0; i < e.target.files.length; i++) {
+      formData.append('files', e.target.files[i]);
+    }
+
+    try {
+      const response = await fetch('/api/files/upload', {
+        method: 'POST',
+        headers: {
+          ...getAuthHeaders(),
+          'x-target-dir': currentPath
+        },
+        credentials: 'include',
+        body: formData
+      });
+      
+      if (response.ok) {
+        fetchFiles(currentPath); // Refresh directory
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        setFileError(errorData.error || "Failed to upload files.");
+      }
+    } catch (error: any) {
+      console.error("Error uploading files:", error);
+      setFileError(error.message || "Network error while uploading files.");
+    }
+    
+    // Clear input
+    e.target.value = '';
+  };
+
+  const handleCreateDirectory = async () => {
+    if (!newFolderName.trim()) return;
+    setFileError(null);
+    try {
+      const response = await fetch('/api/files/mkdir', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders()
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          targetPath: currentPath,
+          name: newFolderName.trim()
+        })
+      });
+      if (response.ok) {
+        setIsCreatingFolder(false);
+        setNewFolderName('');
+        fetchFiles(currentPath);
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        setFileError(errorData.error || "Failed to create directory.");
+      }
+    } catch (error: any) {
+      console.error("Error creating directory:", error);
+      setFileError(error.message || "Network error while creating directory.");
     }
   };
 
   const handlePermissionsChange = async () => {
     if (!editingPermissionsFile) return;
+    setFileError(null);
     try {
       const response = await fetch('/api/files/permissions', {
         method: 'POST',
@@ -267,10 +390,12 @@ export default function App() {
         setEditingPermissionsFile(null);
         fetchFiles(currentPath);
       } else {
-        console.error("Failed to change permissions");
+        const errorData = await response.json().catch(() => ({}));
+        setFileError(errorData.error || "Failed to change permissions.");
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error changing permissions:", error);
+      setFileError(error.message || "Network error while changing permissions.");
     }
   };
 
@@ -860,17 +985,158 @@ export default function App() {
                   </div>
                 ) : activeModal === 'files' ? (
                   <div className="h-full flex flex-col">
-                    <div className="px-6 py-3 bg-black/20 flex items-center gap-2 text-sm text-white/40">
-                      <button onClick={() => fetchFiles(path.dirname(currentPath))} className="hover:text-white"><ChevronLeft size={16} /></button>
-                      <span className="font-mono truncate">{currentPath}</span>
+                    <div className="px-6 py-3 bg-black/20 flex items-center justify-between text-sm text-white/40">
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => fetchFiles(path.dirname(currentPath))} className="hover:text-white"><ChevronLeft size={16} /></button>
+                        <span className="font-mono truncate">{currentPath}</span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <div className="flex bg-black/40 rounded-lg p-0.5 border border-white/5">
+                          <button 
+                            onClick={() => setViewMode('grid')}
+                            className={`p-1.5 rounded-md transition-colors ${viewMode === 'grid' ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white/80'}`}
+                          >
+                            <Grid size={14} />
+                          </button>
+                          <button 
+                            onClick={() => setViewMode('list')}
+                            className={`p-1.5 rounded-md transition-colors ${viewMode === 'list' ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white/80'}`}
+                          >
+                            <List size={14} />
+                          </button>
+                        </div>
+                        <button 
+                          onClick={() => setIsCreatingFolder(true)}
+                          className="bg-white/5 hover:bg-white/10 text-white/80 px-3 py-1 rounded-lg text-xs font-medium transition-colors flex items-center gap-1"
+                        >
+                          <FolderPlus size={14} />
+                          New Folder
+                        </button>
+                        <label className="bg-white/5 hover:bg-white/10 text-white/80 px-3 py-1 rounded-lg text-xs font-medium transition-colors cursor-pointer flex items-center gap-1">
+                          <Upload size={14} />
+                          Upload
+                          <input 
+                            type="file" 
+                            multiple 
+                            className="hidden" 
+                            onChange={handleFileUpload}
+                          />
+                        </label>
+                        {selectedFiles.size > 0 && (
+                          <button 
+                            onClick={handleDownloadSelected}
+                            className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded-lg text-xs font-medium transition-colors"
+                          >
+                            Download Selected ({selectedFiles.size})
+                          </button>
+                        )}
+                        <button 
+                          onClick={() => {
+                            setIsSelectMode(!isSelectMode);
+                            if (isSelectMode) setSelectedFiles(new Set());
+                          }}
+                          className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${isSelectMode ? 'bg-white/20 text-white' : 'bg-white/5 hover:bg-white/10 text-white/60'}`}
+                        >
+                          {isSelectMode ? 'Cancel Selection' : 'Select'}
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex-1 overflow-y-auto p-4 grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-4 relative">
-                      {files.map((file) => (
+                    {fileError && (
+                      <div className="bg-red-500/10 border-b border-red-500/20 px-6 py-2 flex items-center justify-between text-red-400 text-xs">
+                        <span>{fileError}</span>
+                        <button onClick={() => setFileError(null)} className="hover:text-red-300 transition-colors"><X size={14} /></button>
+                      </div>
+                    )}
+                    <div className={`flex-1 overflow-y-auto p-4 relative ${viewMode === 'grid' ? 'grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-4' : 'flex flex-col gap-1'}`}>
+                      {viewMode === 'list' && files.length > 0 && (
+                        <div className="grid grid-cols-12 gap-4 px-4 py-2 text-xs font-medium text-white/40 border-b border-white/5 mb-2">
+                          <div className="col-span-6 md:col-span-5">Name</div>
+                          <div className="col-span-3 md:col-span-2 text-right">Size</div>
+                          <div className="hidden md:block col-span-3">Modified</div>
+                          <div className="col-span-3 md:col-span-2 text-right">Permissions</div>
+                        </div>
+                      )}
+                      {files.map((file) => {
+                        const isSelected = selectedFiles.has(file.name);
+                        
+                        const handleFileClick = () => {
+                          if (isSelectMode) {
+                            const newSelected = new Set(selectedFiles);
+                            if (newSelected.has(file.name)) {
+                              newSelected.delete(file.name);
+                            } else {
+                              newSelected.add(file.name);
+                            }
+                            setSelectedFiles(newSelected);
+                          } else if (file.isDirectory) {
+                            fetchFiles(path.join(currentPath, file.name));
+                          }
+                        };
+
+                        const handlePermissionsClick = (e: React.MouseEvent) => {
+                          e.stopPropagation();
+                          setEditingPermissionsFile(file);
+                          let octal = 0;
+                          const p = file.permissions;
+                          if (p[1] === 'r') octal += 400;
+                          if (p[2] === 'w') octal += 200;
+                          if (p[3] === 'x') octal += 100;
+                          if (p[4] === 'r') octal += 40;
+                          if (p[5] === 'w') octal += 20;
+                          if (p[6] === 'x') octal += 10;
+                          if (p[7] === 'r') octal += 4;
+                          if (p[8] === 'w') octal += 2;
+                          if (p[9] === 'x') octal += 1;
+                          setNewPermissions(octal.toString(8).padStart(3, '0'));
+                        };
+
+                        if (viewMode === 'list') {
+                          return (
+                            <div 
+                              key={file.name}
+                              onClick={handleFileClick}
+                              className={`grid grid-cols-12 gap-4 px-4 py-2.5 rounded-lg items-center transition-colors cursor-pointer group relative ${isSelected ? 'bg-blue-500/20 ring-1 ring-blue-500/50' : 'hover:bg-white/5'}`}
+                            >
+                              <div className="col-span-6 md:col-span-5 flex items-center gap-3 overflow-hidden">
+                                {isSelectMode && (
+                                  <div className={`w-4 h-4 shrink-0 rounded border ${isSelected ? 'bg-blue-500 border-blue-500' : 'border-white/40'} flex items-center justify-center`}>
+                                    {isSelected && <div className="w-2 h-2 bg-white rounded-sm" />}
+                                  </div>
+                                )}
+                                {file.isDirectory ? (
+                                  <FolderOpen size={16} className="text-blue-400 shrink-0" />
+                                ) : (
+                                  <File size={16} className="text-white/40 shrink-0" />
+                                )}
+                                <span className="text-sm truncate">{file.name}</span>
+                              </div>
+                              <div className="col-span-3 md:col-span-2 text-right text-xs text-white/50">
+                                {file.isDirectory ? '--' : (file.size > 1024 * 1024 ? `${(file.size / (1024 * 1024)).toFixed(1)} MB` : `${(file.size / 1024).toFixed(1)} KB`)}
+                              </div>
+                              <div className="hidden md:block col-span-3 text-xs text-white/50 truncate">
+                                {new Date(file.modified).toLocaleString()}
+                              </div>
+                              <div 
+                                className="col-span-3 md:col-span-2 text-right text-xs font-mono text-white/40 hover:text-white transition-colors"
+                                onClick={handlePermissionsClick}
+                              >
+                                {file.permissions}
+                              </div>
+                            </div>
+                          );
+                        }
+
+                        return (
                         <div 
                           key={file.name}
-                          onClick={() => file.isDirectory ? fetchFiles(path.join(currentPath, file.name)) : null}
-                          className="flex flex-col items-center gap-2 p-3 rounded-xl hover:bg-white/5 transition-colors cursor-pointer group"
+                          onClick={handleFileClick}
+                          className={`flex flex-col items-center gap-2 p-3 rounded-xl transition-colors cursor-pointer group relative ${isSelected ? 'bg-blue-500/20 ring-2 ring-blue-500' : 'hover:bg-white/5'}`}
                         >
+                          {isSelectMode && (
+                            <div className={`absolute top-2 left-2 w-4 h-4 rounded border ${isSelected ? 'bg-blue-500 border-blue-500' : 'border-white/40'} flex items-center justify-center`}>
+                              {isSelected && <div className="w-2 h-2 bg-white rounded-sm" />}
+                            </div>
+                          )}
                           {file.isDirectory ? (
                             <FolderOpen size={48} className="text-blue-400 group-hover:scale-110 transition-transform" />
                           ) : (
@@ -879,43 +1145,61 @@ export default function App() {
                           <span className="text-xs text-center truncate w-full">{file.name}</span>
                           <div 
                             className="text-[10px] text-white/40 font-mono hover:text-white transition-colors flex items-center gap-1"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setEditingPermissionsFile(file);
-                              let octal = 0;
-                              const p = file.permissions;
-                              if (p[1] === 'r') octal += 400;
-                              if (p[2] === 'w') octal += 200;
-                              if (p[3] === 'x') octal += 100;
-                              if (p[4] === 'r') octal += 40;
-                              if (p[5] === 'w') octal += 20;
-                              if (p[6] === 'x') octal += 10;
-                              if (p[7] === 'r') octal += 4;
-                              if (p[8] === 'w') octal += 2;
-                              if (p[9] === 'x') octal += 1;
-                              setNewPermissions(octal.toString(8).padStart(3, '0'));
-                            }}
+                            onClick={handlePermissionsClick}
                           >
                             {file.permissions}
                           </div>
                         </div>
-                      ))}
+                      )})}
                       
                       {editingPermissionsFile && (
                         <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
-                          <div className="bg-[#1a1a1a] p-6 rounded-2xl border border-white/10 w-80 shadow-2xl">
+                          <div className="bg-[#1a1a1a] p-6 rounded-2xl border border-white/10 w-[420px] shadow-2xl">
                             <h3 className="text-lg font-bold mb-4">Edit Permissions</h3>
                             <p className="text-sm text-white/60 mb-4 truncate">File: {editingPermissionsFile.name}</p>
                             <div className="mb-6">
-                              <label className="block text-xs text-white/60 mb-2 uppercase tracking-wider">
-                                Octal Mode (e.g. 755)
+                              <label className="block text-xs text-white/60 mb-3 uppercase tracking-wider">
+                                Permissions
                               </label>
-                              <input 
-                                type="text" 
-                                value={newPermissions}
-                                onChange={(e) => setNewPermissions(e.target.value)}
-                                className="w-full bg-black/20 border border-white/10 rounded-xl py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-500/50 font-mono"
-                              />
+                              <div className="space-y-2">
+                                {[
+                                  { label: 'Owner', index: 0 },
+                                  { label: 'Group', index: 1 },
+                                  { label: 'Others', index: 2 }
+                                ].map((entity) => {
+                                  const val = parseInt(newPermissions[entity.index] || '0', 10);
+                                  const toggleBit = (bit: number) => {
+                                    const current = parseInt(newPermissions[entity.index] || '0', 10);
+                                    const updated = current ^ bit;
+                                    const arr = (newPermissions || '000').padStart(3, '0').split('');
+                                    arr[entity.index] = updated.toString();
+                                    setNewPermissions(arr.join(''));
+                                  };
+                                  return (
+                                    <div key={entity.label} className="flex items-center justify-between bg-black/20 p-3 rounded-xl border border-white/5">
+                                      <span className="text-sm text-white/80 w-20 font-medium">{entity.label}</span>
+                                      <div className="flex gap-4">
+                                        <label className="flex items-center gap-1.5 text-xs cursor-pointer hover:text-white transition-colors text-white/60">
+                                          <input type="checkbox" checked={!!(val & 4)} onChange={() => toggleBit(4)} className="rounded border-white/20 bg-black/40 text-blue-500 focus:ring-blue-500/50" />
+                                          Read
+                                        </label>
+                                        <label className="flex items-center gap-1.5 text-xs cursor-pointer hover:text-white transition-colors text-white/60">
+                                          <input type="checkbox" checked={!!(val & 2)} onChange={() => toggleBit(2)} className="rounded border-white/20 bg-black/40 text-blue-500 focus:ring-blue-500/50" />
+                                          Write
+                                        </label>
+                                        <label className="flex items-center gap-1.5 text-xs cursor-pointer hover:text-white transition-colors text-white/60">
+                                          <input type="checkbox" checked={!!(val & 1)} onChange={() => toggleBit(1)} className="rounded border-white/20 bg-black/40 text-blue-500 focus:ring-blue-500/50" />
+                                          Execute
+                                        </label>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                              <div className="mt-4 flex items-center justify-between text-xs text-white/40 px-1">
+                                <span>Octal Value:</span>
+                                <span className="font-mono bg-black/30 px-2 py-1 rounded border border-white/5">{newPermissions.padStart(3, '0')}</span>
+                              </div>
                             </div>
                             <div className="flex justify-end gap-3">
                               <button 
@@ -929,6 +1213,51 @@ export default function App() {
                                 className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-xl text-sm font-medium transition-colors"
                               >
                                 Save
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {isCreatingFolder && (
+                        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
+                          <div className="bg-[#1a1a1a] p-6 rounded-2xl border border-white/10 w-80 shadow-2xl">
+                            <h3 className="text-lg font-bold mb-4">New Folder</h3>
+                            <div className="mb-6">
+                              <label className="block text-xs text-white/60 mb-2 uppercase tracking-wider">
+                                Folder Name
+                              </label>
+                              <input 
+                                type="text" 
+                                value={newFolderName}
+                                onChange={(e) => setNewFolderName(e.target.value)}
+                                placeholder="e.g. projects"
+                                className="w-full bg-black/20 border border-white/10 rounded-xl py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                                autoFocus
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') handleCreateDirectory();
+                                  if (e.key === 'Escape') {
+                                    setIsCreatingFolder(false);
+                                    setNewFolderName('');
+                                  }
+                                }}
+                              />
+                            </div>
+                            <div className="flex justify-end gap-3">
+                              <button 
+                                onClick={() => {
+                                  setIsCreatingFolder(false);
+                                  setNewFolderName('');
+                                }}
+                                className="px-4 py-2 rounded-xl text-sm font-medium hover:bg-white/5 transition-colors"
+                              >
+                                Cancel
+                              </button>
+                              <button 
+                                onClick={handleCreateDirectory}
+                                className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-xl text-sm font-medium transition-colors"
+                              >
+                                Create
                               </button>
                             </div>
                           </div>

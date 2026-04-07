@@ -11,6 +11,7 @@ import jwt from "jsonwebtoken";
 import cookieParser from "cookie-parser";
 import crypto from "crypto";
 import multer from "multer";
+import archiver from "archiver";
 
 const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(32).toString('hex');
 
@@ -27,6 +28,18 @@ const storage = multer.diskStorage({
   }
 });
 const upload = multer({ storage });
+
+// Setup multer for generic file uploads in file explorer
+const fileExplorerStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const targetPath = req.headers['x-target-dir'] as string || os.homedir();
+    cb(null, targetPath);
+  },
+  filename: (req, file, cb) => {
+    cb(null, file.originalname);
+  }
+});
+const uploadFileExplorer = multer({ storage: fileExplorerStorage });
 
 async function startServer() {
   const app = express();
@@ -240,6 +253,68 @@ async function startServer() {
       res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: "Failed to change permissions", details: error.message });
+    }
+  });
+
+  // Download Files API
+  app.post("/api/files/download", requireAuth, async (req, res) => {
+    const { files } = req.body;
+    if (!files || !Array.isArray(files) || files.length === 0) {
+      res.status(400).json({ error: "No files specified" });
+      return;
+    }
+
+    res.attachment('download.zip');
+    const archive = archiver('zip', {
+      zlib: { level: 9 } // Sets the compression level.
+    });
+
+    archive.on('error', function(err) {
+      res.status(500).send({error: err.message});
+    });
+
+    archive.pipe(res);
+
+    for (const file of files) {
+      try {
+        const stat = await fs.stat(file);
+        if (stat.isDirectory()) {
+          archive.directory(file, path.basename(file));
+        } else {
+          archive.file(file, { name: path.basename(file) });
+        }
+      } catch (err) {
+        console.error(`Error adding file ${file} to archive:`, err);
+      }
+    }
+
+    await archive.finalize();
+  });
+
+  // Upload Files API
+  app.post("/api/files/upload", requireAuth, (req, res) => {
+    uploadFileExplorer.array('files')(req, res, (err) => {
+      if (err) {
+        console.error("Upload error:", err);
+        return res.status(400).json({ error: err.message || "File upload failed" });
+      }
+      res.json({ success: true, message: "Files uploaded successfully" });
+    });
+  });
+
+  // Create Directory API
+  app.post("/api/files/mkdir", requireAuth, async (req, res) => {
+    const { targetPath, name } = req.body;
+    if (!targetPath || !name) {
+      res.status(400).json({ error: "Missing path or name" });
+      return;
+    }
+    try {
+      const dirPath = path.join(targetPath, name);
+      await fs.mkdir(dirPath, { recursive: true });
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: "Failed to create directory", details: error.message });
     }
   });
 
