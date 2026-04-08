@@ -68,7 +68,11 @@ interface FileItem {
 // Path helpers for frontend
 const path = {
   dirname: (p: string) => p.split('/').slice(0, -1).join('/') || '/',
-  join: (...parts: string[]) => parts.join('/').replace(/\/+/g, '/')
+  join: (...parts: string[]) => parts.join('/').replace(/\/+/g, '/'),
+  extname: (p: string) => {
+    const match = p.match(/\.[^.]+$/);
+    return match ? match[0] : '';
+  }
 };
 
 // Helper component for highlighting fuzzy search matches
@@ -123,6 +127,9 @@ export default function App() {
   const [editingPermissionsFile, setEditingPermissionsFile] = useState<FileItem | null>(null);
   const [newPermissions, setNewPermissions] = useState('');
   const [fileError, setFileError] = useState<string | null>(null);
+  const [previewFile, setPreviewFile] = useState<FileItem | null>(null);
+  const [previewContent, setPreviewContent] = useState<string | null>(null);
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
   const [terminalOutput, setTerminalOutput] = useState<string[]>(['Welcome to CasaDash Terminal', 'Type "help" for a list of commands.']);
   const [terminalInput, setTerminalInput] = useState('');
   const terminalEndRef = useRef<HTMLDivElement>(null);
@@ -205,6 +212,44 @@ export default function App() {
     }
   }, [terminalOutput]);
 
+  useEffect(() => {
+    const fetchPreview = async () => {
+      if (!previewFile) {
+        setPreviewContent(null);
+        return;
+      }
+      
+      const ext = path.extname(previewFile.name).toLowerCase();
+      const isImage = ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp'].includes(ext);
+      const isText = ['.txt', '.md', '.json', '.js', '.ts', '.tsx', '.jsx', '.html', '.css', '.csv', '.log', '.env'].includes(ext);
+      
+      if (isText) {
+        setIsPreviewLoading(true);
+        try {
+          const filePath = path.join(currentPath, previewFile.name);
+          const response = await fetch(`/api/files/raw?path=${encodeURIComponent(filePath)}`, {
+            headers: { ...getAuthHeaders() },
+            credentials: 'include'
+          });
+          if (response.ok) {
+            const text = await response.text();
+            setPreviewContent(text);
+          } else {
+            setPreviewContent("Failed to load file content.");
+          }
+        } catch (error) {
+          setPreviewContent("Error loading file content.");
+        } finally {
+          setIsPreviewLoading(false);
+        }
+      } else {
+        setPreviewContent(null);
+      }
+    };
+    
+    fetchPreview();
+  }, [previewFile, currentPath]);
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError('');
@@ -255,6 +300,7 @@ export default function App() {
         setFiles(data.files);
         setCurrentPath(data.path);
         setSelectedFiles(new Set()); // Clear selection on navigate
+        setPreviewFile(null); // Clear preview on navigate
       } else {
         const errorData = await response.json().catch(() => ({}));
         setFileError(errorData.error || "Failed to fetch files. Permission denied or path does not exist.");
@@ -1115,16 +1161,17 @@ export default function App() {
                         <button onClick={() => setFileError(null)} className="hover:text-red-300 transition-colors"><X size={14} /></button>
                       </div>
                     )}
-                    <div className={`flex-1 overflow-y-auto p-4 relative ${viewMode === 'grid' ? 'grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-4' : 'flex flex-col gap-1'}`}>
-                      {viewMode === 'list' && files.length > 0 && (
-                        <div className="grid grid-cols-12 gap-4 px-4 py-2 text-xs font-medium text-white/40 border-b border-white/5 mb-2">
-                          <div className="col-span-6 md:col-span-5">Name</div>
-                          <div className="col-span-3 md:col-span-2 text-right">Size</div>
-                          <div className="hidden md:block col-span-3">Modified</div>
-                          <div className="col-span-3 md:col-span-2 text-right">Permissions</div>
-                        </div>
-                      )}
-                      {files.map((file) => {
+                    <div className="flex-1 flex overflow-hidden relative">
+                      <div className={`flex-1 overflow-y-auto p-4 relative ${viewMode === 'grid' ? 'grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-4 content-start' : 'flex flex-col gap-1'}`}>
+                        {viewMode === 'list' && files.length > 0 && (
+                          <div className="grid grid-cols-12 gap-4 px-4 py-2 text-xs font-medium text-white/40 border-b border-white/5 mb-2">
+                            <div className="col-span-6 md:col-span-5">Name</div>
+                            <div className="col-span-3 md:col-span-2 text-right">Size</div>
+                            <div className="hidden md:block col-span-3">Modified</div>
+                            <div className="col-span-3 md:col-span-2 text-right">Permissions</div>
+                          </div>
+                        )}
+                        {files.map((file) => {
                         const isSelected = selectedFiles.has(file.name);
                         
                         const handleFileClick = () => {
@@ -1138,6 +1185,8 @@ export default function App() {
                             setSelectedFiles(newSelected);
                           } else if (file.isDirectory) {
                             fetchFiles(path.join(currentPath, file.name));
+                          } else {
+                            setPreviewFile(file);
                           }
                         };
 
@@ -1219,6 +1268,77 @@ export default function App() {
                           </div>
                         </div>
                       )})}
+                      </div>
+                      
+                      {previewFile && (
+                        <div className="absolute inset-y-0 right-0 w-full md:relative md:w-80 border-l border-white/10 bg-[#1a1a1a] md:bg-black/20 flex flex-col overflow-hidden shrink-0 z-20">
+                          <div className="p-4 border-b border-white/10 flex items-center justify-between bg-black/40">
+                            <h3 className="font-bold truncate text-sm text-white/90">{previewFile.name}</h3>
+                            <button onClick={() => setPreviewFile(null)} className="p-1.5 hover:bg-white/10 rounded-lg transition-colors text-white/60 hover:text-white">
+                              <X size={14} />
+                            </button>
+                          </div>
+                          <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
+                            {(() => {
+                              const ext = path.extname(previewFile.name).toLowerCase();
+                              const isImage = ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp'].includes(ext);
+                              const isText = ['.txt', '.md', '.json', '.js', '.ts', '.tsx', '.jsx', '.html', '.css', '.csv', '.log', '.env'].includes(ext);
+                              
+                              if (isImage) {
+                                return (
+                                  <div className="flex flex-col items-center gap-4">
+                                    <img 
+                                      src={`/api/files/raw?path=${encodeURIComponent(path.join(currentPath, previewFile.name))}`} 
+                                      alt={previewFile.name}
+                                      className="max-w-full rounded border border-white/10"
+                                      referrerPolicy="no-referrer"
+                                    />
+                                    <div className="text-xs text-white/40 font-mono w-full space-y-1">
+                                      <div className="flex justify-between"><span>Size:</span> <span>{(previewFile.size / 1024).toFixed(1)} KB</span></div>
+                                      <div className="flex justify-between"><span>Modified:</span> <span>{new Date(previewFile.modified).toLocaleDateString()}</span></div>
+                                    </div>
+                                  </div>
+                                );
+                              }
+                              
+                              if (isText) {
+                                return (
+                                  <div className="flex flex-col h-full gap-4">
+                                    <div className="text-xs text-white/40 font-mono w-full space-y-1 shrink-0">
+                                      <div className="flex justify-between"><span>Size:</span> <span>{(previewFile.size / 1024).toFixed(1)} KB</span></div>
+                                      <div className="flex justify-between"><span>Modified:</span> <span>{new Date(previewFile.modified).toLocaleDateString()}</span></div>
+                                    </div>
+                                    <div className="flex-1 bg-black/40 rounded-lg border border-white/5 p-3 overflow-auto">
+                                      {isPreviewLoading ? (
+                                        <div className="text-xs text-white/40 animate-pulse">Loading content...</div>
+                                      ) : (
+                                        <pre className="text-xs font-mono text-white/80 whitespace-pre-wrap break-all">
+                                          {previewContent}
+                                        </pre>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              }
+                              
+                              return (
+                                <div className="flex flex-col items-center justify-center h-full gap-4 text-center">
+                                  <File size={48} className="text-white/20" />
+                                  <div className="space-y-2 w-full">
+                                    <div className="text-sm font-medium text-white/80">No preview available</div>
+                                    <div className="text-xs text-white/40 font-mono bg-black/40 p-3 rounded-lg border border-white/5 space-y-2 text-left">
+                                      <div className="flex justify-between"><span>Type:</span> <span>{ext || 'Unknown'}</span></div>
+                                      <div className="flex justify-between"><span>Size:</span> <span>{(previewFile.size / 1024).toFixed(1)} KB</span></div>
+                                      <div className="flex justify-between"><span>Modified:</span> <span>{new Date(previewFile.modified).toLocaleString()}</span></div>
+                                      <div className="flex justify-between"><span>Permissions:</span> <span>{previewFile.permissions}</span></div>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })()}
+                          </div>
+                        </div>
+                      )}
                       
                       {editingPermissionsFile && (
                         <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">

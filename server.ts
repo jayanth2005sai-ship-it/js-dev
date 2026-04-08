@@ -254,6 +254,25 @@ async function startServer() {
     }
   });
 
+  // Raw File API
+  app.get("/api/files/raw", requireAuth, async (req, res) => {
+    const targetPath = req.query.path as string;
+    if (!targetPath) {
+      res.status(400).json({ error: "Path is required" });
+      return;
+    }
+    try {
+      const stat = await fs.stat(targetPath);
+      if (stat.isDirectory()) {
+        res.status(400).json({ error: "Cannot read directory as raw file" });
+        return;
+      }
+      res.sendFile(path.resolve(targetPath));
+    } catch (error: any) {
+      res.status(500).json({ error: "Failed to read file", details: error.message });
+    }
+  });
+
   // Change File Permissions API
   app.post("/api/files/permissions", requireAuth, async (req, res) => {
     const { filePath, mode } = req.body;
