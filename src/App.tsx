@@ -586,7 +586,7 @@ export default function App() {
         <motion.div 
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="relative z-10 w-full max-w-md p-8 rounded-3xl bg-black/40 backdrop-blur-2xl border border-white/10 shadow-2xl"
+          className="relative z-10 w-full max-w-md mx-4 p-6 md:p-8 rounded-3xl bg-black/40 backdrop-blur-2xl border border-white/10 shadow-2xl"
         >
           <div className="flex flex-col items-center mb-8">
             <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-500/20 mb-4">
@@ -644,13 +644,13 @@ export default function App() {
       <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/60" />
 
       {/* Top Navigation Bar */}
-      <nav className="relative z-10 flex items-center justify-between px-8 py-4 backdrop-blur-md bg-black/10 border-b border-white/5">
-        <div className="flex items-center gap-6">
+      <nav className="relative z-10 flex items-center justify-between px-4 md:px-8 py-4 backdrop-blur-md bg-black/10 border-b border-white/5">
+        <div className="flex items-center gap-4 md:gap-6">
           <div className="flex items-center gap-2 font-bold text-xl tracking-tight">
             <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center shadow-lg shadow-blue-500/20">
               <Home size={18} className="text-white" />
             </div>
-            <span>CasaDash</span>
+            <span className="hidden sm:inline">CasaDash</span>
           </div>
           
           <div className="hidden md:flex items-center gap-4 text-sm font-medium text-white/60">
@@ -660,8 +660,8 @@ export default function App() {
           </div>
         </div>
 
-        <div className="flex items-center gap-6">
-          <div className="flex items-center gap-4 px-3 py-1.5 rounded-full bg-white/5 border border-white/10">
+        <div className="flex items-center gap-3 md:gap-6">
+          <div className="flex items-center gap-2 md:gap-4 px-3 py-1.5 rounded-full bg-white/5 border border-white/10">
             <Clock size={16} className="text-blue-400" />
             <span className="text-sm font-mono tracking-wider">
               {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -680,8 +680,8 @@ export default function App() {
       </nav>
 
       {/* Main Content Area */}
-      <main className="relative z-10 container mx-auto px-8 pt-12 pb-24 h-[calc(100vh-76px)] overflow-y-auto custom-scrollbar">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+      <main className="relative z-10 container mx-auto px-4 md:px-8 pt-6 md:pt-12 pb-24 h-[calc(100vh-76px)] overflow-y-auto custom-scrollbar">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 md:gap-8">
           
           {/* Left Sidebar: System Info & Search */}
           <div className="lg:col-span-3 space-y-8">
@@ -844,7 +844,7 @@ export default function App() {
 
             <motion.div 
               layout
-              className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-6"
+              className="grid grid-cols-4 sm:grid-cols-4 md:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6"
             >
               <AnimatePresence mode="popLayout">
                 {filteredApps.map((app, index) => (
@@ -857,13 +857,13 @@ export default function App() {
                     transition={{ delay: index * 0.05 }}
                     whileHover={{ y: -8 }}
                     onClick={app.action}
-                    className="group flex flex-col items-center gap-4 cursor-pointer"
+                    className="group flex flex-col items-center gap-2 md:gap-4 cursor-pointer"
                   >
-                    <div className={`w-20 h-20 ${app.color} rounded-3xl flex items-center justify-center shadow-2xl shadow-black/40 group-hover:shadow-blue-500/20 transition-all duration-300 relative overflow-hidden`}>
+                    <div className={`w-16 h-16 md:w-20 md:h-20 ${app.color} rounded-2xl md:rounded-3xl flex items-center justify-center shadow-2xl shadow-black/40 group-hover:shadow-blue-500/20 transition-all duration-300 relative overflow-hidden`}>
                       <div className="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
                       {app.icon}
                     </div>
-                    <span className="text-sm font-medium text-white/80 group-hover:text-white transition-colors">
+                    <span className="text-xs md:text-sm font-medium text-center text-white/80 group-hover:text-white transition-colors">
                       <HighlightedText text={app.name} matches={app.matches} />
                     </span>
                   </motion.div>
@@ -873,12 +873,12 @@ export default function App() {
               {/* Add App Placeholder */}
               <motion.div
                 whileHover={{ y: -8 }}
-                className="group flex flex-col items-center gap-4 cursor-pointer"
+                className="group flex flex-col items-center gap-2 md:gap-4 cursor-pointer"
               >
-                <div className="w-20 h-20 bg-white/5 border-2 border-dashed border-white/10 rounded-3xl flex items-center justify-center group-hover:border-blue-500/50 group-hover:bg-blue-500/5 transition-all">
-                  <LayoutGrid size={32} className="text-white/20 group-hover:text-blue-400 transition-colors" />
+                <div className="w-16 h-16 md:w-20 md:h-20 bg-white/5 border-2 border-dashed border-white/10 rounded-2xl md:rounded-3xl flex items-center justify-center group-hover:border-blue-500/50 group-hover:bg-blue-500/5 transition-all">
+                  <LayoutGrid size={24} className="text-white/20 group-hover:text-blue-400 transition-colors md:w-8 md:h-8" />
                 </div>
-                <span className="text-sm font-medium text-white/40 group-hover:text-blue-400 transition-colors">
+                <span className="text-xs md:text-sm font-medium text-center text-white/40 group-hover:text-blue-400 transition-colors">
                   Install More
                 </span>
               </motion.div>
@@ -894,13 +894,13 @@ export default function App() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-12 bg-black/60 backdrop-blur-sm"
+            className="fixed inset-0 z-50 flex items-center justify-center p-0 md:p-12 bg-black/60 backdrop-blur-sm"
           >
             <motion.div 
               initial={{ scale: 0.9, y: 20 }}
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.9, y: 20 }}
-              className="w-full max-w-5xl h-full max-h-[800px] bg-[#1a1a1a] rounded-3xl border border-white/10 shadow-2xl overflow-hidden flex flex-col"
+              className="w-full max-w-5xl h-full max-h-[100dvh] md:max-h-[800px] bg-[#1a1a1a] rounded-none md:rounded-3xl border-0 md:border border-white/10 shadow-2xl overflow-hidden flex flex-col"
             >
               {/* Modal Header */}
               <div className="flex items-center justify-between px-6 py-4 border-b border-white/5 bg-white/5">
@@ -987,12 +987,12 @@ export default function App() {
                   </div>
                 ) : activeModal === 'files' ? (
                   <div className="h-full flex flex-col">
-                    <div className="px-6 py-3 bg-black/20 flex items-center justify-between text-sm text-white/40">
-                      <div className="flex items-center gap-2">
-                        <button onClick={() => fetchFiles(path.dirname(currentPath))} className="hover:text-white"><ChevronLeft size={16} /></button>
+                    <div className="px-4 md:px-6 py-3 bg-black/20 flex flex-col md:flex-row md:items-center justify-between gap-3 text-sm text-white/40">
+                      <div className="flex items-center gap-2 overflow-hidden">
+                        <button onClick={() => fetchFiles(path.dirname(currentPath))} className="hover:text-white shrink-0"><ChevronLeft size={16} /></button>
                         <span className="font-mono truncate">{currentPath}</span>
                       </div>
-                      <div className="flex items-center gap-3">
+                      <div className="flex flex-wrap items-center gap-2 md:gap-3">
                         <div className="flex bg-black/40 rounded-lg p-0.5 border border-white/5">
                           <button 
                             onClick={() => setViewMode('grid')}
@@ -1009,14 +1009,14 @@ export default function App() {
                         </div>
                         <button 
                           onClick={() => setIsCreatingFolder(true)}
-                          className="bg-white/5 hover:bg-white/10 text-white/80 px-3 py-1 rounded-lg text-xs font-medium transition-colors flex items-center gap-1"
+                          className="bg-white/5 hover:bg-white/10 text-white/80 px-3 py-1.5 md:py-1 rounded-lg text-xs font-medium transition-colors flex items-center gap-1"
                         >
                           <FolderPlus size={14} />
-                          New Folder
+                          <span className="hidden sm:inline">New Folder</span>
                         </button>
-                        <label className="bg-white/5 hover:bg-white/10 text-white/80 px-3 py-1 rounded-lg text-xs font-medium transition-colors cursor-pointer flex items-center gap-1">
+                        <label className="bg-white/5 hover:bg-white/10 text-white/80 px-3 py-1.5 md:py-1 rounded-lg text-xs font-medium transition-colors cursor-pointer flex items-center gap-1">
                           <Upload size={14} />
-                          Upload
+                          <span className="hidden sm:inline">Upload</span>
                           <input 
                             type="file" 
                             multiple 
@@ -1027,9 +1027,9 @@ export default function App() {
                         {selectedFiles.size > 0 && (
                           <button 
                             onClick={handleDownloadSelected}
-                            className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded-lg text-xs font-medium transition-colors"
+                            className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 md:py-1 rounded-lg text-xs font-medium transition-colors"
                           >
-                            Download Selected ({selectedFiles.size})
+                            Download ({selectedFiles.size})
                           </button>
                         )}
                         <button 
@@ -1037,19 +1037,19 @@ export default function App() {
                             setIsSelectMode(!isSelectMode);
                             if (isSelectMode) setSelectedFiles(new Set());
                           }}
-                          className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${isSelectMode ? 'bg-white/20 text-white' : 'bg-white/5 hover:bg-white/10 text-white/60'}`}
+                          className={`px-3 py-1.5 md:py-1 rounded-lg text-xs font-medium transition-colors ${isSelectMode ? 'bg-white/20 text-white' : 'bg-white/5 hover:bg-white/10 text-white/60'}`}
                         >
-                          {isSelectMode ? 'Cancel Selection' : 'Select'}
+                          {isSelectMode ? 'Cancel' : 'Select'}
                         </button>
                       </div>
                     </div>
                     {fileError && (
-                      <div className="bg-red-500/10 border-b border-red-500/20 px-6 py-2 flex items-center justify-between text-red-400 text-xs">
+                      <div className="bg-red-500/10 border-b border-red-500/20 px-4 md:px-6 py-2 flex items-center justify-between text-red-400 text-xs">
                         <span>{fileError}</span>
                         <button onClick={() => setFileError(null)} className="hover:text-red-300 transition-colors"><X size={14} /></button>
                       </div>
                     )}
-                    <div className={`flex-1 overflow-y-auto p-4 relative ${viewMode === 'grid' ? 'grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-4' : 'flex flex-col gap-1'}`}>
+                    <div className={`flex-1 overflow-y-auto p-4 relative ${viewMode === 'grid' ? 'grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-4' : 'flex flex-col gap-1'}`}>
                       {viewMode === 'list' && files.length > 0 && (
                         <div className="grid grid-cols-12 gap-4 px-4 py-2 text-xs font-medium text-white/40 border-b border-white/5 mb-2">
                           <div className="col-span-6 md:col-span-5">Name</div>
