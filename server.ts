@@ -159,9 +159,18 @@ async function startServer() {
       try {
         const fsStats = await si.fsSize();
         const mainDisk = fsStats.find(d => d.fs !== 'none' && d.type !== 'overlay') || fsStats[0] || { use: 0, used: 0, size: 0 };
-        diskUsagePercent = Math.round(mainDisk.use);
-        diskUsedGB = (mainDisk.used / 1024 / 1024 / 1024).toFixed(1);
-        diskTotalGB = (mainDisk.size / 1024 / 1024 / 1024).toFixed(1);
+        
+        let size = mainDisk.size;
+        let used = mainDisk.used;
+        
+        // Fix for container environments (like Cloud Run/gVisor) reporting Exabytes of storage
+        if (size > 1024 * 1024 * 1024 * 1024 * 100) { // If > 100 TB
+          size = 50 * 1024 * 1024 * 1024; // Default to 50 GB virtual disk for demo
+        }
+        
+        diskUsagePercent = size > 0 ? Math.round((used / size) * 100) : 0;
+        diskUsedGB = (used / 1024 / 1024 / 1024).toFixed(1);
+        diskTotalGB = (size / 1024 / 1024 / 1024).toFixed(1);
       } catch (e) {
         // Ignore disk error
       }
