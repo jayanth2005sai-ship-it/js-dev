@@ -116,6 +116,7 @@ export default function App() {
   const [files, setFiles] = useState<FileItem[]>([]);
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
   const [isSelectMode, setIsSelectMode] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
@@ -302,6 +303,40 @@ export default function App() {
     } catch (error: any) {
       console.error("Error downloading files:", error);
       setFileError(error.message || "Network error while downloading files.");
+    }
+  };
+
+  const handleDeleteSelected = async () => {
+    if (selectedFiles.size === 0) return;
+    
+    setFileError(null);
+    setShowDeleteConfirm(false);
+    
+    const filePaths = Array.from(selectedFiles).map((name: string) => path.join(currentPath, name));
+    
+    try {
+      const response = await fetch('/api/files', {
+        method: 'DELETE',
+        headers: { 
+          'Content-Type': 'application/json',
+          ...getAuthHeaders()
+        },
+        credentials: 'include',
+        body: JSON.stringify({ files: filePaths })
+      });
+      
+      if (response.ok) {
+        // Reset selection and refresh files
+        setSelectedFiles(new Set());
+        setIsSelectMode(false);
+        fetchFiles(currentPath);
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        setFileError(errorData.error || "Failed to delete selected files.");
+      }
+    } catch (error: any) {
+      console.error("Error deleting files:", error);
+      setFileError(error.message || "Network error while deleting files.");
     }
   };
 
@@ -1025,17 +1060,48 @@ export default function App() {
                           />
                         </label>
                         {selectedFiles.size > 0 && (
-                          <button 
-                            onClick={handleDownloadSelected}
-                            className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 md:py-1 rounded-lg text-xs font-medium transition-colors"
-                          >
-                            Download ({selectedFiles.size})
-                          </button>
+                          <>
+                            {showDeleteConfirm ? (
+                              <div className="flex items-center gap-2 bg-red-500/20 px-2 py-1 rounded-lg border border-red-500/30">
+                                <span className="text-xs text-red-200">Delete {selectedFiles.size} item(s)?</span>
+                                <button 
+                                  onClick={handleDeleteSelected}
+                                  className="bg-red-600 hover:bg-red-500 text-white px-2 py-1 rounded text-xs font-medium transition-colors"
+                                >
+                                  Yes
+                                </button>
+                                <button 
+                                  onClick={() => setShowDeleteConfirm(false)}
+                                  className="bg-white/10 hover:bg-white/20 text-white px-2 py-1 rounded text-xs font-medium transition-colors"
+                                >
+                                  No
+                                </button>
+                              </div>
+                            ) : (
+                              <>
+                                <button 
+                                  onClick={handleDownloadSelected}
+                                  className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 md:py-1 rounded-lg text-xs font-medium transition-colors"
+                                >
+                                  Download ({selectedFiles.size})
+                                </button>
+                                <button 
+                                  onClick={() => setShowDeleteConfirm(true)}
+                                  className="bg-red-600 hover:bg-red-500 text-white px-3 py-1.5 md:py-1 rounded-lg text-xs font-medium transition-colors"
+                                >
+                                  Delete ({selectedFiles.size})
+                                </button>
+                              </>
+                            )}
+                          </>
                         )}
                         <button 
                           onClick={() => {
                             setIsSelectMode(!isSelectMode);
-                            if (isSelectMode) setSelectedFiles(new Set());
+                            if (isSelectMode) {
+                              setSelectedFiles(new Set());
+                              setShowDeleteConfirm(false);
+                            }
                           }}
                           className={`px-3 py-1.5 md:py-1 rounded-lg text-xs font-medium transition-colors ${isSelectMode ? 'bg-white/20 text-white' : 'bg-white/5 hover:bg-white/10 text-white/60'}`}
                         >

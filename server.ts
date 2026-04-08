@@ -300,6 +300,29 @@ async function startServer() {
     await archive.finalize();
   });
 
+  // Delete Files API
+  app.delete("/api/files", requireAuth, async (req, res) => {
+    const { files } = req.body;
+    if (!files || !Array.isArray(files) || files.length === 0) {
+      res.status(400).json({ error: "No files specified" });
+      return;
+    }
+
+    try {
+      for (const file of files) {
+        const stat = await fs.stat(file);
+        if (stat.isDirectory()) {
+          await fs.rm(file, { recursive: true, force: true });
+        } else {
+          await fs.unlink(file);
+        }
+      }
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: "Failed to delete files", details: error.message });
+    }
+  });
+
   // Upload Files API
   app.post("/api/files/upload", requireAuth, (req, res) => {
     uploadFileExplorer.array('files')(req, res, (err) => {
