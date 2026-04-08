@@ -826,7 +826,9 @@ export default function App() {
                 </div>
               </div>
               <div className="mt-4 text-center">
-                <p className="text-sm text-white/60">{systemStats.disk.usedGB} GB of {systemStats.disk.totalGB} GB used</p>
+                <p className="text-sm text-white/60">
+                  {Math.max(0, parseFloat(systemStats.disk.totalGB) - parseFloat(systemStats.disk.usedGB)).toFixed(1)} GB free of {systemStats.disk.totalGB} GB
+                </p>
               </div>
             </div>
           </div>

@@ -158,7 +158,7 @@ async function startServer() {
       let diskTotalGB = "0.0";
       try {
         const fsStats = await si.fsSize();
-        const mainDisk = fsStats[0] || { use: 0, used: 0, size: 0 };
+        const mainDisk = fsStats.find(d => d.fs !== 'none' && d.type !== 'overlay') || fsStats[0] || { use: 0, used: 0, size: 0 };
         diskUsagePercent = Math.round(mainDisk.use);
         diskUsedGB = (mainDisk.used / 1024 / 1024 / 1024).toFixed(1);
         diskTotalGB = (mainDisk.size / 1024 / 1024 / 1024).toFixed(1);
