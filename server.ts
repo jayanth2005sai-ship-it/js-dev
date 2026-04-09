@@ -160,7 +160,11 @@ async function startServer() {
       let diskTotalGB = "0.0";
       try {
         const fsStats = await si.fsSize();
-        const mainDisk = fsStats.find(d => d.fs !== 'none' && d.type !== 'overlay') || fsStats[0] || { use: 0, used: 0, size: 0 };
+        let mainDisk = fsStats.find(d => d.mount === '/');
+        if (!mainDisk) {
+          mainDisk = fsStats.filter(d => d.fs !== 'none' && d.type !== 'overlay' && !d.mount.startsWith('/snap/'))
+                            .sort((a, b) => b.size - a.size)[0] || fsStats[0] || { use: 0, used: 0, size: 0 };
+        }
         
         let size = mainDisk.size;
         let used = mainDisk.used;

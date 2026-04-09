@@ -1,2 +1,6 @@
 import si from 'systeminformation';
-si.diskLayout().then(data => console.log(JSON.stringify(data, null, 2)));
+async function test() {
+  const fsStats = await si.fsSize();
+  console.log(JSON.stringify(fsStats, null, 2));
+}
+test();
