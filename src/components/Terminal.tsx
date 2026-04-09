@@ -30,10 +30,12 @@ export default function Terminal({ isActive }: TerminalProps) {
     term.loadAddon(fitAddon);
     
     term.open(terminalRef.current);
-    try {
-      fitAddon.fit();
-    } catch (e) {
-      // Ignore
+    if (terminalRef.current.clientWidth > 0 && terminalRef.current.clientHeight > 0) {
+      try {
+        fitAddon.fit();
+      } catch (e) {
+        // Ignore
+      }
     }
 
     xtermRef.current = term;
@@ -64,10 +66,12 @@ export default function Terminal({ isActive }: TerminalProps) {
     });
 
     const handleResize = () => {
-      try {
-        fitAddon.fit();
-      } catch (e) {
-        // Ignore resize errors when container is hidden
+      if (terminalRef.current && terminalRef.current.clientWidth > 0 && terminalRef.current.clientHeight > 0) {
+        try {
+          fitAddon.fit();
+        } catch (e) {
+          // Ignore resize errors when container is hidden
+        }
       }
     };
 
@@ -84,10 +88,12 @@ export default function Terminal({ isActive }: TerminalProps) {
     if (isActive && fitAddonRef.current) {
       // Small delay to ensure container is rendered and sized
       setTimeout(() => {
-        try {
-          fitAddonRef.current?.fit();
-        } catch (e) {
-          // Ignore
+        if (terminalRef.current && terminalRef.current.clientWidth > 0 && terminalRef.current.clientHeight > 0) {
+          try {
+            fitAddonRef.current?.fit();
+          } catch (e) {
+            // Ignore
+          }
         }
       }, 100);
     }
