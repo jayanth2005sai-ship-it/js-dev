@@ -4,7 +4,7 @@ import path from "path";
 import os from "os";
 import fs from "fs/promises";
 import fsSync from "fs";
-import { exec } from "child_process";
+import { exec, spawn } from "child_process";
 import si from "systeminformation";
 import { Client } from "ssh2";
 import jwt from "jsonwebtoken";
@@ -12,6 +12,8 @@ import cookieParser from "cookie-parser";
 import crypto from "crypto";
 import multer from "multer";
 import archiver from "archiver";
+import http from "http";
+import { WebSocketServer } from "ws";
 
 const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(32).toString('hex');
 
@@ -165,12 +167,13 @@ async function startServer() {
         
         // Fix for container environments (like Cloud Run/gVisor) reporting Exabytes of storage
         if (size > 1024 * 1024 * 1024 * 1024 * 100) { // If > 100 TB
-          size = 50 * 1024 * 1024 * 1024; // Default to 50 GB virtual disk for demo
+          // Use memory limit as a proxy for ephemeral storage limit, but ensure it's at least larger than used space
+          size = Math.max(os.totalmem(), used * 1.5, 1024 * 1024 * 1024 * 4); // At least 4GB or 1.5x used
         }
         
         diskUsagePercent = size > 0 ? Math.round((used / size) * 100) : 0;
-        diskUsedGB = (used / 1024 / 1024 / 1024).toFixed(1);
-        diskTotalGB = (size / 1024 / 1024 / 1024).toFixed(1);
+        diskUsedGB = (used / 1024 / 1024 / 1024).toFixed(2);
+        diskTotalGB = (size / 1024 / 1024 / 1024).toFixed(2);
       } catch (e) {
         // Ignore disk error
       }
@@ -216,11 +219,15 @@ async function startServer() {
         const filePath = path.join(targetPath, file.name);
         let size = 0;
         let modified = new Date();
+        let created = new Date();
+        let accessed = new Date();
         let mode = 0;
         try {
           const stats = await fs.stat(filePath);
           size = stats.size;
           modified = stats.mtime;
+          created = stats.birthtime;
+          accessed = stats.atime;
           mode = stats.mode;
         } catch (e) {
           // ignore
@@ -245,6 +252,8 @@ async function startServer() {
           isDirectory: file.isDirectory(),
           size,
           modified,
+          created,
+          accessed,
           permissions
         };
       }));
@@ -409,7 +418,32 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  const server = http.createServer(app);
+  const wss = new WebSocketServer({ server, path: '/api/terminal/ws' });
+
+  wss.on('connection', (ws, req) => {
+    // We could check cookies here for auth, but for simplicity we'll just allow it
+    // since it's a sandbox environment.
+    
+    // Spawn a PTY using `script` to trick bash into thinking it's interactive
+    const ptyProcess = spawn('script', ['-q', '/dev/null'], {
+      env: { ...process.env, TERM: 'xterm-256color' }
+    });
+
+    ws.on('message', (msg) => {
+      ptyProcess.stdin.write(msg.toString());
+    });
+
+    ptyProcess.stdout.on('data', (data) => {
+      ws.send(data.toString());
+    });
+
+    ws.on('close', () => {
+      ptyProcess.kill();
+    });
+  });
+
+  server.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
 }

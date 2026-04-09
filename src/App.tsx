@@ -62,6 +62,8 @@ interface FileItem {
   isDirectory: boolean;
   size: number;
   modified: string;
+  created: string;
+  accessed: string;
   permissions: string;
 }
 
@@ -104,6 +106,10 @@ const HighlightedText = ({ text, matches }: { text: string, matches?: readonly F
   return <>{elements}</>;
 };
 
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import Terminal from './components/Terminal';
+
 export default function App() {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [searchQuery, setSearchQuery] = useState('');
@@ -130,9 +136,7 @@ export default function App() {
   const [previewFile, setPreviewFile] = useState<FileItem | null>(null);
   const [previewContent, setPreviewContent] = useState<string | null>(null);
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
-  const [terminalOutput, setTerminalOutput] = useState<string[]>(['Welcome to CasaDash Terminal', 'Type "help" for a list of commands.']);
-  const [terminalInput, setTerminalInput] = useState('');
-  const terminalEndRef = useRef<HTMLDivElement>(null);
+  const [imageRotation, setImageRotation] = useState(0);
 
   // Auth States
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -207,13 +211,10 @@ export default function App() {
   }, [isAuthenticated]);
 
   useEffect(() => {
-    if (terminalEndRef.current) {
-      terminalEndRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [terminalOutput]);
+    let objectUrl: string | null = null;
 
-  useEffect(() => {
     const fetchPreview = async () => {
+      setImageRotation(0);
       if (!previewFile) {
         setPreviewContent(null);
         return;
@@ -223,7 +224,7 @@ export default function App() {
       const isImage = ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp'].includes(ext);
       const isText = ['.txt', '.md', '.json', '.js', '.ts', '.tsx', '.jsx', '.html', '.css', '.csv', '.log', '.env'].includes(ext);
       
-      if (isText) {
+      if (isText || isImage) {
         setIsPreviewLoading(true);
         try {
           const filePath = path.join(currentPath, previewFile.name);
@@ -232,8 +233,14 @@ export default function App() {
             credentials: 'include'
           });
           if (response.ok) {
-            const text = await response.text();
-            setPreviewContent(text);
+            if (isText) {
+              const text = await response.text();
+              setPreviewContent(text);
+            } else if (isImage) {
+              const blob = await response.blob();
+              objectUrl = window.URL.createObjectURL(blob);
+              setPreviewContent(objectUrl);
+            }
           } else {
             setPreviewContent("Failed to load file content.");
           }
@@ -248,6 +255,12 @@ export default function App() {
     };
     
     fetchPreview();
+
+    return () => {
+      if (objectUrl) {
+        window.URL.revokeObjectURL(objectUrl);
+      }
+    };
   }, [previewFile, currentPath]);
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -477,31 +490,6 @@ export default function App() {
     } catch (error: any) {
       console.error("Error changing permissions:", error);
       setFileError(error.message || "Network error while changing permissions.");
-    }
-  };
-
-  const runCommand = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!terminalInput.trim()) return;
-
-    const cmd = terminalInput;
-    setTerminalInput('');
-    setTerminalOutput(prev => [...prev, `> ${cmd}`]);
-
-    try {
-      const response = await fetch('/api/terminal', {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          ...getAuthHeaders()
-        },
-        credentials: 'include',
-        body: JSON.stringify({ command: cmd, cwd: currentPath })
-      });
-      const data = await response.json();
-      setTerminalOutput(prev => [...prev, data.output || data.error || 'Command executed.']);
-    } catch (error) {
-      setTerminalOutput(prev => [...prev, 'Error: Failed to execute command.']);
     }
   };
 
@@ -908,7 +896,7 @@ export default function App() {
               </div>
               <div className="mt-4 text-center">
                 <p className="text-sm text-white/60">
-                  {Math.max(0, parseFloat(systemStats.disk.totalGB) - parseFloat(systemStats.disk.usedGB)).toFixed(1)} GB free of {systemStats.disk.totalGB} GB
+                  {Math.max(0, parseFloat(systemStats.disk.totalGB) - parseFloat(systemStats.disk.usedGB)).toFixed(2)} GB free of {systemStats.disk.totalGB} GB
                 </p>
               </div>
             </div>
@@ -1285,14 +1273,124 @@ export default function App() {
                               const isText = ['.txt', '.md', '.json', '.js', '.ts', '.tsx', '.jsx', '.html', '.css', '.csv', '.log', '.env'].includes(ext);
                               
                               if (isImage) {
+                                const handleRotate = (direction: 'left' | 'right') => {
+                                  setImageRotation(prev => {
+                                    let newRotation = prev + (direction === 'right' ? 90 : -90);
+                                    if (newRotation >= 360) newRotation -= 360;
+                                    if (newRotation < 0) newRotation += 360;
+                                    return newRotation;
+                                  });
+                                };
+
+                                const handleSaveRotation = async () => {
+                                  if (!previewContent || imageRotation === 0) return;
+                                  
+                                  try {
+                                    setIsPreviewLoading(true);
+                                    
+                                    // Create an image element to draw to canvas
+                                    const img = new Image();
+                                    img.crossOrigin = "anonymous";
+                                    
+                                    await new Promise((resolve, reject) => {
+                                      img.onload = resolve;
+                                      img.onerror = reject;
+                                      img.src = previewContent;
+                                    });
+                                    
+                                    const canvas = document.createElement('canvas');
+                                    const ctx = canvas.getContext('2d');
+                                    if (!ctx) throw new Error("Could not get canvas context");
+                                    
+                                    // Set canvas dimensions based on rotation
+                                    if (imageRotation === 90 || imageRotation === 270) {
+                                      canvas.width = img.height;
+                                      canvas.height = img.width;
+                                    } else {
+                                      canvas.width = img.width;
+                                      canvas.height = img.height;
+                                    }
+                                    
+                                    ctx.translate(canvas.width / 2, canvas.height / 2);
+                                    ctx.rotate((imageRotation * Math.PI) / 180);
+                                    ctx.drawImage(img, -img.width / 2, -img.height / 2);
+                                    
+                                    // Get blob from canvas
+                                    const blob = await new Promise<Blob>((resolve, reject) => {
+                                      canvas.toBlob((b) => {
+                                        if (b) resolve(b);
+                                        else reject(new Error("Canvas toBlob failed"));
+                                      }, 'image/png'); // Default to png to preserve quality/transparency
+                                    });
+                                    
+                                    // Upload the rotated image
+                                    const formData = new FormData();
+                                    formData.append('path', currentPath);
+                                    formData.append('files', blob, previewFile.name);
+                                    
+                                    const response = await fetch('/api/files/upload', {
+                                      method: 'POST',
+                                      headers: { ...getAuthHeaders() },
+                                      credentials: 'include',
+                                      body: formData
+                                    });
+                                    
+                                    if (response.ok) {
+                                      setImageRotation(0);
+                                      fetchFiles(currentPath);
+                                      // The preview will auto-refresh because fetchFiles updates the file list
+                                      // and we might need to re-trigger the preview fetch.
+                                      // For now, just clear the preview to force a refresh when clicked again,
+                                      // or we can just let it be and the user can re-click.
+                                      setPreviewFile(null);
+                                    } else {
+                                      const errorData = await response.json().catch(() => ({}));
+                                      setFileError(errorData.error || "Failed to save rotated image.");
+                                    }
+                                  } catch (error: any) {
+                                    console.error("Error saving rotation:", error);
+                                    setFileError(error.message || "Failed to process image rotation.");
+                                  } finally {
+                                    setIsPreviewLoading(false);
+                                  }
+                                };
+
                                 return (
                                   <div className="flex flex-col items-center gap-4">
-                                    <img 
-                                      src={`/api/files/raw?path=${encodeURIComponent(path.join(currentPath, previewFile.name))}`} 
-                                      alt={previewFile.name}
-                                      className="max-w-full rounded border border-white/10"
-                                      referrerPolicy="no-referrer"
-                                    />
+                                    {isPreviewLoading ? (
+                                      <div className="w-full aspect-video bg-black/40 rounded border border-white/5 flex items-center justify-center">
+                                        <div className="text-xs text-white/40 animate-pulse">Processing image...</div>
+                                      </div>
+                                    ) : previewContent === "Failed to load file content." || previewContent === "Error loading file content." ? (
+                                      <div className="w-full aspect-video bg-red-500/10 rounded border border-red-500/20 flex items-center justify-center">
+                                        <div className="text-xs text-red-400">{previewContent}</div>
+                                      </div>
+                                    ) : previewContent ? (
+                                      <div className="relative group overflow-hidden rounded border border-white/10 flex items-center justify-center bg-black/40 min-h-[200px] w-full">
+                                        <img 
+                                          src={previewContent} 
+                                          alt={previewFile.name}
+                                          className="max-w-full max-h-[400px] object-contain transition-transform duration-300"
+                                          style={{ transform: `rotate(${imageRotation}deg)` }}
+                                        />
+                                        <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-black/80 backdrop-blur-md px-3 py-1.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity border border-white/10">
+                                          <button onClick={() => handleRotate('left')} className="p-1 hover:bg-white/20 rounded text-white/80 hover:text-white transition-colors" title="Rotate Left">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+                                          </button>
+                                          <button onClick={() => handleRotate('right')} className="p-1 hover:bg-white/20 rounded text-white/80 hover:text-white transition-colors" title="Rotate Right">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
+                                          </button>
+                                          {imageRotation !== 0 && (
+                                            <>
+                                              <div className="w-px h-4 bg-white/20 mx-1"></div>
+                                              <button onClick={handleSaveRotation} className="text-xs font-medium text-blue-400 hover:text-blue-300 px-2 py-1 rounded hover:bg-white/10 transition-colors">
+                                                Save
+                                              </button>
+                                            </>
+                                          )}
+                                        </div>
+                                      </div>
+                                    ) : null}
                                     <div className="text-xs text-white/40 font-mono w-full space-y-1">
                                       <div className="flex justify-between"><span>Size:</span> <span>{(previewFile.size / 1024).toFixed(1)} KB</span></div>
                                       <div className="flex justify-between"><span>Modified:</span> <span>{new Date(previewFile.modified).toLocaleDateString()}</span></div>
@@ -1302,19 +1400,42 @@ export default function App() {
                               }
                               
                               if (isText) {
+                                const languageMap: Record<string, string> = {
+                                  '.js': 'javascript',
+                                  '.jsx': 'jsx',
+                                  '.ts': 'typescript',
+                                  '.tsx': 'tsx',
+                                  '.json': 'json',
+                                  '.html': 'html',
+                                  '.css': 'css',
+                                  '.md': 'markdown',
+                                  '.csv': 'csv',
+                                  '.log': 'log',
+                                  '.env': 'bash'
+                                };
+                                const language = languageMap[ext] || 'text';
+
                                 return (
                                   <div className="flex flex-col h-full gap-4">
                                     <div className="text-xs text-white/40 font-mono w-full space-y-1 shrink-0">
                                       <div className="flex justify-between"><span>Size:</span> <span>{(previewFile.size / 1024).toFixed(1)} KB</span></div>
                                       <div className="flex justify-between"><span>Modified:</span> <span>{new Date(previewFile.modified).toLocaleDateString()}</span></div>
                                     </div>
-                                    <div className="flex-1 bg-black/40 rounded-lg border border-white/5 p-3 overflow-auto">
+                                    <div className="flex-1 bg-black/40 rounded-lg border border-white/5 overflow-hidden flex flex-col">
                                       {isPreviewLoading ? (
-                                        <div className="text-xs text-white/40 animate-pulse">Loading content...</div>
+                                        <div className="p-3 text-xs text-white/40 animate-pulse">Loading content...</div>
+                                      ) : previewContent === "Failed to load file content." || previewContent === "Error loading file content." ? (
+                                        <div className="p-3 text-xs text-red-400">{previewContent}</div>
                                       ) : (
-                                        <pre className="text-xs font-mono text-white/80 whitespace-pre-wrap break-all">
-                                          {previewContent}
-                                        </pre>
+                                        <SyntaxHighlighter 
+                                          language={language} 
+                                          style={vscDarkPlus}
+                                          customStyle={{ margin: 0, padding: '0.75rem', fontSize: '0.75rem', background: 'transparent', flex: 1, overflow: 'auto' }}
+                                          wrapLines={true}
+                                          wrapLongLines={true}
+                                        >
+                                          {previewContent || ''}
+                                        </SyntaxHighlighter>
                                       )}
                                     </div>
                                   </div>
@@ -1329,7 +1450,9 @@ export default function App() {
                                     <div className="text-xs text-white/40 font-mono bg-black/40 p-3 rounded-lg border border-white/5 space-y-2 text-left">
                                       <div className="flex justify-between"><span>Type:</span> <span>{ext || 'Unknown'}</span></div>
                                       <div className="flex justify-between"><span>Size:</span> <span>{(previewFile.size / 1024).toFixed(1)} KB</span></div>
+                                      <div className="flex justify-between"><span>Created:</span> <span>{new Date(previewFile.created).toLocaleString()}</span></div>
                                       <div className="flex justify-between"><span>Modified:</span> <span>{new Date(previewFile.modified).toLocaleString()}</span></div>
+                                      <div className="flex justify-between"><span>Accessed:</span> <span>{new Date(previewFile.accessed).toLocaleString()}</span></div>
                                       <div className="flex justify-between"><span>Permissions:</span> <span>{previewFile.permissions}</span></div>
                                     </div>
                                   </div>
@@ -1454,31 +1577,7 @@ export default function App() {
                     </div>
                   </div>
                 ) : (
-                  <div className="h-full bg-black p-4 font-mono text-sm flex flex-col">
-                    <div className="flex-1 overflow-y-auto space-y-1 custom-scrollbar">
-                      {terminalOutput.map((line, i) => (
-                        <div key={i} className="whitespace-pre-wrap break-all">
-                          {line.startsWith('>') ? (
-                            <span className="text-emerald-400">{line}</span>
-                          ) : (
-                            <span className="text-white/80">{line}</span>
-                          )}
-                        </div>
-                      ))}
-                      <div ref={terminalEndRef} />
-                    </div>
-                    <form onSubmit={runCommand} className="mt-4 flex items-center gap-2 border-t border-white/10 pt-4">
-                      <span className="text-emerald-400">$</span>
-                      <input 
-                        type="text"
-                        value={terminalInput}
-                        onChange={(e) => setTerminalInput(e.target.value)}
-                        autoFocus
-                        className="flex-1 bg-transparent border-none focus:ring-0 outline-none"
-                        placeholder="Enter command..."
-                      />
-                    </form>
-                  </div>
+                  <Terminal isActive={activeModal === 'terminal'} />
                 )}
               </div>
             </motion.div>
