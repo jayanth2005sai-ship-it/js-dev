@@ -48,6 +48,8 @@ import {
   FileArchive,
   FilePenLine,
   Laptop,
+  RotateCw,
+  RotateCcw,
   Database as DatabaseIcon,
   Settings as SettingsIcon,
   ClipboardList,
@@ -1976,6 +1978,24 @@ export default function App() {
                                 <div className="flex items-center gap-2">
                                   {getFileIcon(previewFile, 20)}
                                   <span className="font-medium text-white">{previewFile.name}</span>
+                                  {previewFile.name.match(/\.(jpg|jpeg|png|gif|webp|svg|bmp|tiff|ico)$/i) && (
+                                    <div className="flex items-center gap-1 ml-4 border-l border-white/10 pl-4">
+                                      <button 
+                                        onClick={() => setImageRotation(prev => (prev - 90) % 360)}
+                                        className="p-1.5 hover:bg-white/10 rounded-lg text-white/60 hover:text-white transition-colors"
+                                        title="Rotate Left"
+                                      >
+                                        <RotateCcw size={16} />
+                                      </button>
+                                      <button 
+                                        onClick={() => setImageRotation(prev => (prev + 90) % 360)}
+                                        className="p-1.5 hover:bg-white/10 rounded-lg text-white/60 hover:text-white transition-colors"
+                                        title="Rotate Right"
+                                      >
+                                        <RotateCw size={16} />
+                                      </button>
+                                    </div>
+                                  )}
                                 </div>
                                 <button onClick={() => setPreviewFile(null)} className="p-1.5 hover:bg-white/10 rounded-lg text-white/60 hover:text-white transition-colors">
                                   <X size={18} />
@@ -1987,7 +2007,8 @@ export default function App() {
                                     <img 
                                       src={`/api/files/raw?path=${encodeURIComponent(path.join(currentPath, previewFile.name))}`} 
                                       alt={previewFile.name} 
-                                      className="max-w-full max-h-full object-contain rounded-lg shadow-2xl" 
+                                      style={{ transform: `rotate(${imageRotation}deg)` }}
+                                      className="max-w-full max-h-full object-contain rounded-lg shadow-2xl transition-transform duration-300" 
                                     />
                                   </div>
                                 ) : previewFile.name.match(/\.(mp4|webm)$/i) ? (
