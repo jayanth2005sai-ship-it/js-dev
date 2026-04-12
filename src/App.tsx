@@ -158,6 +158,11 @@ export default function App() {
   const [files, setFiles] = useState<FileItem[]>([]);
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
   const [isSelectMode, setIsSelectMode] = useState(false);
+  const [hiddenAppIds, setHiddenAppIds] = useState<Set<string>>(() => {
+    const saved = localStorage.getItem('casadash_hidden_apps');
+    return saved ? new Set(JSON.parse(saved)) : new Set();
+  });
+  const [isEditMode, setIsEditMode] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [fileSearchQuery, setFileSearchQuery] = useState('');
@@ -842,6 +847,20 @@ export default function App() {
     setTimeout(() => setWallpaperError(''), 3000);
   };
 
+  const toggleAppVisibility = (appId: string) => {
+    if (['files', 'terminal', 'settings'].includes(appId)) return;
+    setHiddenAppIds(prev => {
+      const next = new Set(prev);
+      if (next.has(appId)) {
+        next.delete(appId);
+      } else {
+        next.add(appId);
+      }
+      localStorage.setItem('casadash_hidden_apps', JSON.stringify(Array.from(next)));
+      return next;
+    });
+  };
+
   const apps: AppIcon[] = [
     { id: 'files', name: 'Files', icon: <FolderOpen size={32} />, color: 'bg-blue-500', action: () => { setActiveModal('files'); fetchFiles(); } },
     { id: 'terminal', name: 'Terminal', icon: <TerminalIcon size={32} />, color: 'bg-zinc-800', action: () => setActiveModal('terminal') },
@@ -867,12 +886,12 @@ export default function App() {
     threshold: 0.4,
   });
 
-  const filteredApps: AppIconWithMatches[] = searchQuery
+  const filteredApps: AppIconWithMatches[] = (searchQuery
     ? fuse.search(searchQuery).map(result => ({
         ...result.item,
         matches: result.matches
       }))
-    : apps;
+    : apps).filter(app => isEditMode || !hiddenAppIds.has(app.id));
 
   if (isCheckingAuth) {
     return <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center text-white">Loading...</div>;
@@ -1372,9 +1391,14 @@ export default function App() {
           {/* Right Content: App Grid */}
           <div className="lg:col-span-9">
             <div className="flex items-center justify-between mb-8">
-              <h2 className="text-2xl font-bold tracking-tight">Installed Apps</h2>
-              <button className="text-sm font-medium text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1">
-                Manage Apps <Settings size={14} />
+              <h2 className="text-2xl font-bold tracking-tight">
+                {isEditMode ? 'Manage Apps' : 'Installed Apps'}
+              </h2>
+              <button 
+                onClick={() => setIsEditMode(!isEditMode)}
+                className={`text-sm font-medium transition-colors flex items-center gap-1 ${isEditMode ? 'text-emerald-400 hover:text-emerald-300' : 'text-blue-400 hover:text-blue-300'}`}
+              >
+                {isEditMode ? 'Done Managing' : 'Manage Apps'} <Settings size={14} />
               </button>
             </div>
 
@@ -1391,13 +1415,25 @@ export default function App() {
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, scale: 0.8 }}
                     transition={{ delay: index * 0.05 }}
-                    whileHover={{ y: -8 }}
-                    onClick={app.action}
-                    className="group flex flex-col items-center gap-2 md:gap-4 cursor-pointer"
+                    whileHover={isEditMode ? {} : { y: -8 }}
+                    onClick={() => !isEditMode && app.action?.()}
+                    className={`group flex flex-col items-center gap-2 md:gap-4 cursor-pointer relative ${isEditMode && hiddenAppIds.has(app.id) ? 'opacity-40' : ''}`}
                   >
                     <div className={`w-16 h-16 md:w-20 md:h-20 ${app.color} rounded-2xl md:rounded-3xl flex items-center justify-center shadow-2xl shadow-black/40 group-hover:shadow-blue-500/20 transition-all duration-300 relative overflow-hidden`}>
                       <div className="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
                       {app.icon}
+                      
+                      {isEditMode && !['files', 'terminal', 'settings'].includes(app.id) && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleAppVisibility(app.id);
+                          }}
+                          className={`absolute top-1 right-1 p-1 rounded-full shadow-lg transition-transform hover:scale-110 z-10 ${hiddenAppIds.has(app.id) ? 'bg-emerald-500 text-white' : 'bg-red-500 text-white'}`}
+                        >
+                          {hiddenAppIds.has(app.id) ? <CheckCircle2 size={12} /> : <X size={12} />}
+                        </button>
+                      )}
                     </div>
                     <span className="text-xs md:text-sm font-medium text-center text-white/80 group-hover:text-white transition-colors">
                       <HighlightedText text={app.name} matches={app.matches} />
@@ -1520,6 +1556,36 @@ export default function App() {
                           </button>
                         </div>
                       </div>
+
+                      {hiddenAppIds.size > 0 && (
+                        <div className="bg-white/5 p-6 rounded-2xl border border-white/10">
+                          <h4 className="text-sm font-bold text-white/80 mb-4 flex items-center gap-2">
+                            <LayoutGrid size={16} /> Hidden Apps
+                          </h4>
+                          <div className="grid grid-cols-2 gap-2">
+                            {apps.filter(app => hiddenAppIds.has(app.id)).map(app => (
+                              <div key={app.id} className="flex items-center justify-between p-2 rounded-lg bg-white/5 border border-white/5">
+                                <span className="text-xs text-white/60">{app.name}</span>
+                                <button 
+                                  onClick={() => toggleAppVisibility(app.id)}
+                                  className="text-[10px] text-blue-400 hover:text-blue-300 font-medium"
+                                >
+                                  Restore
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                          <button 
+                            onClick={() => {
+                              setHiddenAppIds(new Set());
+                              localStorage.removeItem('casadash_hidden_apps');
+                            }}
+                            className="w-full mt-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-white/60 text-xs transition-colors"
+                          >
+                            Restore All Apps
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 ) : activeModal === 'files' ? (
