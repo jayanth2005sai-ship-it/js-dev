@@ -298,7 +298,7 @@ export default function App() {
         }
         setIsAuthenticated(true);
       } else {
-        setLoginError(data.error || 'Login failed');
+        setLoginError('Incorrect password, try again');
       }
     } catch (error) {
       setLoginError('Network error');
