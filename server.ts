@@ -15,6 +15,27 @@ import archiver from "archiver";
 import http from "http";
 import { WebSocketServer } from "ws";
 
+// Create necessary directories for the file explorer to look like a real OS
+const setupDirectories = async () => {
+  const dirs = [
+    '/home',
+    '/home/Documents',
+    '/home/Images',
+    '/home/Downloads',
+    '/mnt'
+  ];
+  for (const dir of dirs) {
+    try {
+      if (!fsSync.existsSync(dir)) {
+        await fs.mkdir(dir, { recursive: true });
+      }
+    } catch (e) {
+      console.error(`Failed to create directory ${dir}:`, e);
+    }
+  }
+};
+setupDirectories();
+
 const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(32).toString('hex');
 
 // Setup multer for wallpaper uploads
@@ -47,7 +68,8 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json());
+  app.use(express.json({ limit: '500mb' }));
+  app.use(express.urlencoded({ limit: '500mb', extended: true }));
   app.use(cookieParser());
   
   // Serve public files statically
@@ -163,7 +185,7 @@ async function startServer() {
         let mainDisk = fsStats.find(d => d.mount === '/');
         if (!mainDisk) {
           mainDisk = fsStats.filter(d => d.fs !== 'none' && d.type !== 'overlay' && !d.mount.startsWith('/snap/'))
-                            .sort((a, b) => b.size - a.size)[0] || fsStats[0] || { use: 0, used: 0, size: 0 };
+                            .sort((a, b) => b.size - a.size)[0] || fsStats[0] || ({ use: 0, used: 0, size: 0 } as any);
         }
         
         let size = mainDisk.size;
@@ -286,6 +308,25 @@ async function startServer() {
     }
   });
 
+  // Download Single File API (GET)
+  app.get("/api/files/download", requireAuth, async (req, res) => {
+    const targetPath = req.query.path as string;
+    if (!targetPath) {
+      res.status(400).json({ error: "Path is required" });
+      return;
+    }
+    try {
+      const stat = await fs.stat(targetPath);
+      if (stat.isDirectory()) {
+        res.status(400).json({ error: "Cannot download directory directly" });
+        return;
+      }
+      res.download(path.resolve(targetPath));
+    } catch (error: any) {
+      res.status(500).json({ error: "Failed to download file", details: error.message });
+    }
+  });
+
   // Change File Permissions API
   app.post("/api/files/permissions", requireAuth, async (req, res) => {
     const { filePath, mode } = req.body;
@@ -379,6 +420,21 @@ async function startServer() {
       res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: "Failed to create directory", details: error.message });
+    }
+  });
+
+  // Rename/Move File API
+  app.post("/api/files/rename", requireAuth, async (req, res) => {
+    const { oldPath, newPath } = req.body;
+    if (!oldPath || !newPath) {
+      res.status(400).json({ error: "Missing oldPath or newPath" });
+      return;
+    }
+    try {
+      await fs.rename(oldPath, newPath);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to rename file" });
     }
   });
 
