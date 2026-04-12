@@ -159,6 +159,7 @@ export default function App() {
   const [currentPath, setCurrentPath] = useState('');
   const [files, setFiles] = useState<FileItem[]>([]);
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
+  const [showInfoPanel, setShowInfoPanel] = useState(false);
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [hiddenAppIds, setHiddenAppIds] = useState<Set<string>>(() => {
     const saved = localStorage.getItem('casadash_hidden_apps');
@@ -186,6 +187,54 @@ export default function App() {
   const [previewContent, setPreviewContent] = useState<string | null>(null);
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
   const [imageRotation, setImageRotation] = useState(0);
+  const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    setImageRotation(0);
+    
+    if (previewFile && previewFile.name.match(/\.(jpg|jpeg|png|gif|webp|svg|bmp|tiff|ico)$/i)) {
+      const loadImg = async () => {
+        setIsPreviewLoading(true);
+        try {
+          const response = await fetch(`/api/files/raw?path=${encodeURIComponent(path.join(currentPath, previewFile.name))}`, {
+            headers: getAuthHeaders()
+          });
+          if (response.ok) {
+            const blob = await response.blob();
+            const url = URL.createObjectURL(blob);
+            setPreviewImageUrl(url);
+          } else {
+            setPreviewImageUrl(null);
+          }
+        } catch (e) {
+          console.error("Failed to load preview image:", e);
+          setPreviewImageUrl(null);
+        } finally {
+          setIsPreviewLoading(false);
+        }
+      };
+      loadImg();
+    } else {
+      if (previewImageUrl) {
+        URL.revokeObjectURL(previewImageUrl);
+        setPreviewImageUrl(null);
+      }
+    }
+
+    return () => {
+      // Note: We don't revoke here because it might still be needed by the component
+      // Revocation is handled in the next effect run or when previewFile becomes null
+    };
+  }, [previewFile]);
+
+  // Separate effect for cleanup to avoid revoking while still in use
+  useEffect(() => {
+    return () => {
+      if (previewImageUrl) {
+        URL.revokeObjectURL(previewImageUrl);
+      }
+    };
+  }, [previewImageUrl]);
 
   // Auth States
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -1135,6 +1184,7 @@ export default function App() {
                 <button 
                   onClick={() => {
                     setPreviewFile(selectedFileObj);
+                    setShowInfoPanel(false);
                     if (window.innerWidth < 768) {
                       setSelectedFiles(new Set());
                     }
@@ -1208,12 +1258,6 @@ export default function App() {
               <Home size={18} className="text-white" />
             </div>
             <span className="hidden sm:inline">CasaDash</span>
-          </div>
-          
-          <div className="hidden md:flex items-center gap-4 text-sm font-medium text-white/60">
-            <span className="hover:text-white transition-colors cursor-pointer">Dashboard</span>
-            <span className="hover:text-white transition-colors cursor-pointer">App Store</span>
-            <span className="hover:text-white transition-colors cursor-pointer">Files</span>
           </div>
         </div>
 
@@ -1754,7 +1798,13 @@ export default function App() {
                       </div>
                       
                       {/* File Grid */}
-                      <div className="flex-1 overflow-y-auto p-6 relative">
+                      <div 
+                        className="flex-1 overflow-y-auto p-6 relative"
+                        onClick={() => {
+                          setSelectedFiles(new Set());
+                          setShowInfoPanel(false);
+                        }}
+                      >
                         {fileError && (
                           <div className="bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-3 mb-4 flex items-center justify-between text-red-400 text-sm">
                             <span>{fileError}</span>
@@ -1842,6 +1892,7 @@ export default function App() {
                                   }
                                 }}
                                 onClick={(e) => {
+                                  e.stopPropagation();
                                   // If Ctrl or Meta key is pressed, toggle selection instead of opening
                                   if (e.ctrlKey || e.metaKey) {
                                     const newSelected = new Set(selectedFiles);
@@ -1861,14 +1912,17 @@ export default function App() {
                                     setSelectedFiles(newSelected);
                                     setPreviewFile(file);
                                   }
+                                  setShowInfoPanel(false);
                                 }}
                                 onContextMenu={(e) => {
                                   e.preventDefault();
+                                  e.stopPropagation();
                                   const newSelected = new Set([file.name]);
                                   setSelectedFiles(newSelected);
+                                  setShowInfoPanel(true);
                                 }}
                                 onDoubleClick={(e) => {
-                                  e.preventDefault(); // Prevent default double-click behavior as single click handles it
+                                  e.preventDefault();
                                 }}
                                 className={`flex flex-col items-center justify-center p-3 md:p-6 rounded-xl cursor-pointer transition-all border ${isSelected ? 'bg-blue-500/20 border-blue-500/50 shadow-[0_0_15px_rgba(59,130,246,0.15)]' : 'bg-transparent border-transparent hover:bg-white/5'}`}
                               >
@@ -2004,12 +2058,22 @@ export default function App() {
                               <div className="flex-1 overflow-auto bg-black/40 p-4">
                                 {previewFile.name.match(/\.(jpg|jpeg|png|gif|webp|svg|bmp|tiff|ico)$/i) ? (
                                   <div className="w-full h-full flex items-center justify-center">
-                                    <img 
-                                      src={`/api/files/raw?path=${encodeURIComponent(path.join(currentPath, previewFile.name))}`} 
-                                      alt={previewFile.name} 
-                                      style={{ transform: `rotate(${imageRotation}deg)` }}
-                                      className="max-w-full max-h-full object-contain rounded-lg shadow-2xl transition-transform duration-300" 
-                                    />
+                                    {isPreviewLoading ? (
+                                      <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                                    ) : previewImageUrl ? (
+                                      <img 
+                                        src={previewImageUrl} 
+                                        alt={previewFile.name} 
+                                        referrerPolicy="no-referrer"
+                                        style={{ transform: `rotate(${imageRotation}deg)` }}
+                                        className="max-w-full max-h-full object-contain rounded-lg shadow-2xl transition-transform duration-300" 
+                                      />
+                                    ) : (
+                                      <div className="text-center text-white/40">
+                                        <ImageIcon size={48} className="mx-auto mb-2 opacity-20" />
+                                        <p>Failed to load image preview</p>
+                                      </div>
+                                    )}
                                   </div>
                                 ) : previewFile.name.match(/\.(mp4|webm)$/i) ? (
                                   <div className="w-full h-full flex items-center justify-center">
@@ -2017,6 +2081,7 @@ export default function App() {
                                       src={`/api/files/raw?path=${encodeURIComponent(path.join(currentPath, previewFile.name))}`} 
                                       controls 
                                       autoPlay
+                                      crossOrigin="use-credentials"
                                       className="max-w-full max-h-full rounded-lg shadow-2xl" 
                                     />
                                   </div>
@@ -2066,7 +2131,7 @@ export default function App() {
 
                     {/* Right Sidebar - Desktop */}
                     <AnimatePresence>
-                      {selectedFiles.size > 0 && (
+                      {showInfoPanel && selectedFiles.size > 0 && (
                         <motion.div 
                           initial={{ opacity: 0, x: 20 }}
                           animate={{ opacity: 1, x: 0 }}
@@ -2083,13 +2148,16 @@ export default function App() {
 
                     {/* Right Sidebar - Mobile Bottom Sheet */}
                     <AnimatePresence>
-                      {selectedFiles.size > 0 && (
+                      {showInfoPanel && selectedFiles.size > 0 && (
                         <>
                           <motion.div
                             initial={{ opacity: 0 }}
                             animate={{ opacity: 1 }}
                             exit={{ opacity: 0 }}
-                            onClick={() => setSelectedFiles(new Set())}
+                            onClick={() => {
+                              setSelectedFiles(new Set());
+                              setShowInfoPanel(false);
+                            }}
                             className="fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm md:hidden"
                           />
                           <motion.div

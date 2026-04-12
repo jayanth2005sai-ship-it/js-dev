@@ -371,18 +371,22 @@ async function startServer() {
   // Raw File API
   app.get("/api/files/raw", requireAuth, async (req, res) => {
     const targetPath = req.query.path as string;
+    console.log(`[RAW] Request for: ${targetPath}`);
     if (!targetPath) {
       res.status(400).json({ error: "Path is required" });
       return;
     }
     try {
-      const stat = await fs.stat(targetPath);
+      const resolvedPath = path.resolve(targetPath);
+      console.log(`[RAW] Resolved path: ${resolvedPath}`);
+      const stat = await fs.stat(resolvedPath);
       if (stat.isDirectory()) {
         res.status(400).json({ error: "Cannot read directory as raw file" });
         return;
       }
-      res.sendFile(path.resolve(targetPath));
+      res.sendFile(resolvedPath);
     } catch (error: any) {
+      console.error(`[RAW] Error reading ${targetPath}:`, error);
       res.status(500).json({ error: "Failed to read file", details: error.message });
     }
   });
