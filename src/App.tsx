@@ -359,6 +359,31 @@ export default function App() {
     }
   };
 
+  const handleDownload = async (filePath: string) => {
+    setFileError(null);
+    try {
+      const response = await fetch(`/api/files/download?path=${encodeURIComponent(filePath)}`, {
+        headers: getAuthHeaders()
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Failed to download: ${response.statusText}`);
+      }
+      
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = path.basename(filePath);
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch (error: any) {
+      setFileError(error.message || "Failed to download file");
+    }
+  };
+
   const handleDownloadSelected = async () => {
     if (selectedFiles.size === 0) return;
     setFileError(null);
@@ -1894,53 +1919,33 @@ export default function App() {
                                 {previewFile.name.match(/\.(jpg|jpeg|png|gif|webp|svg|bmp|tiff|ico)$/i) ? (
                                   <div className="w-full h-full flex items-center justify-center">
                                     <img 
-                                      src={`/api/files/download?path=${encodeURIComponent(path.join(currentPath, previewFile.name))}`} 
+                                      src={`/api/files/raw?path=${encodeURIComponent(path.join(currentPath, previewFile.name))}`} 
                                       alt={previewFile.name} 
-                                      className="max-w-full max-h-full object-contain rounded-lg" 
-                                      onLoad={(e) => {
-                                        // This is a workaround to load images with auth headers
-                                        const img = e.target as HTMLImageElement;
-                                        fetch(img.src, { headers: getAuthHeaders() })
-                                          .then(res => res.blob())
-                                          .then(blob => {
-                                            img.src = URL.createObjectURL(blob);
-                                          });
-                                      }}
+                                      className="max-w-full max-h-full object-contain rounded-lg shadow-2xl" 
                                     />
                                   </div>
                                 ) : previewFile.name.match(/\.(mp4|webm)$/i) ? (
                                   <div className="w-full h-full flex items-center justify-center">
                                     <video 
-                                      src={`/api/files/download?path=${encodeURIComponent(path.join(currentPath, previewFile.name))}`} 
+                                      src={`/api/files/raw?path=${encodeURIComponent(path.join(currentPath, previewFile.name))}`} 
                                       controls 
-                                      className="max-w-full max-h-full rounded-lg" 
-                                      onLoadedMetadata={(e) => {
-                                        // This is a workaround to load video with auth headers
-                                        const video = e.target as HTMLVideoElement;
-                                        fetch(video.src, { headers: getAuthHeaders() })
-                                          .then(res => res.blob())
-                                          .then(blob => {
-                                            video.src = URL.createObjectURL(blob);
-                                          });
-                                      }}
+                                      autoPlay
+                                      className="max-w-full max-h-full rounded-lg shadow-2xl" 
                                     />
                                   </div>
                                 ) : previewFile.name.match(/\.(mp3|wav|ogg)$/i) ? (
                                   <div className="w-full h-full flex items-center justify-center">
                                     <audio 
-                                      src={`/api/files/download?path=${encodeURIComponent(path.join(currentPath, previewFile.name))}`} 
+                                      src={`/api/files/raw?path=${encodeURIComponent(path.join(currentPath, previewFile.name))}`} 
                                       controls 
+                                      autoPlay
                                       className="w-full max-w-md" 
-                                      onLoadedMetadata={(e) => {
-                                        // This is a workaround to load audio with auth headers
-                                        const audio = e.target as HTMLAudioElement;
-                                        fetch(audio.src, { headers: getAuthHeaders() })
-                                          .then(res => res.blob())
-                                          .then(blob => {
-                                            audio.src = URL.createObjectURL(blob);
-                                          });
-                                      }}
                                     />
+                                  </div>
+                                ) : isPreviewLoading ? (
+                                  <div className="w-full h-full flex flex-col items-center justify-center gap-4 text-white/40">
+                                    <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                                    <p className="text-sm">Loading content...</p>
                                   </div>
                                 ) : previewContent ? (
                                   <SyntaxHighlighter
@@ -1951,15 +1956,18 @@ export default function App() {
                                     {previewContent}
                                   </SyntaxHighlighter>
                                 ) : (
-                                  <div className="w-full h-full flex flex-col items-center justify-center text-white/40 gap-4">
-                                    {isPreviewLoading ? (
-                                      'Loading preview...'
-                                    ) : (
-                                      <>
-                                        {getFileIcon(previewFile, 64)}
-                                        <span className="text-sm">Preview not available for this file type</span>
-                                      </>
-                                    )}
+                                  <div className="w-full h-full flex flex-col items-center justify-center gap-4 text-white/20">
+                                    {getFileIcon(previewFile, 64)}
+                                    <div className="text-center">
+                                      <p className="text-lg font-medium text-white/40">No preview available</p>
+                                      <p className="text-sm">This file type cannot be previewed directly.</p>
+                                    </div>
+                                    <button 
+                                      onClick={() => handleDownload(path.join(currentPath, previewFile.name))}
+                                      className="mt-4 px-6 py-2 bg-white/5 hover:bg-white/10 rounded-xl text-white transition-colors flex items-center gap-2"
+                                    >
+                                      <Download size={18} /> Download to view
+                                    </button>
                                   </div>
                                 )}
                               </div>
