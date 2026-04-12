@@ -1749,25 +1749,33 @@ export default function App() {
                                   }
                                 }}
                                 onClick={(e) => {
-                                  if (!file.isDirectory) {
+                                  // If Ctrl or Meta key is pressed, toggle selection instead of opening
+                                  if (e.ctrlKey || e.metaKey) {
+                                    const newSelected = new Set(selectedFiles);
+                                    if (newSelected.has(file.name)) {
+                                      newSelected.delete(file.name);
+                                    } else {
+                                      newSelected.add(file.name);
+                                    }
+                                    setSelectedFiles(newSelected);
+                                    return;
+                                  }
+
+                                  if (file.isDirectory) {
+                                    fetchFiles(path.join(currentPath, file.name));
+                                  } else {
                                     const newSelected = new Set([file.name]);
                                     setSelectedFiles(newSelected);
-                                  } else {
-                                    // For folders, single click just clears selection to avoid opening info panel
-                                    setSelectedFiles(new Set());
+                                    setPreviewFile(file);
                                   }
                                 }}
                                 onContextMenu={(e) => {
-                                  if (file.isDirectory) {
-                                    e.preventDefault();
-                                    const newSelected = new Set([file.name]);
-                                    setSelectedFiles(newSelected);
-                                  }
+                                  e.preventDefault();
+                                  const newSelected = new Set([file.name]);
+                                  setSelectedFiles(newSelected);
                                 }}
-                                onDoubleClick={() => {
-                                  if (file.isDirectory) {
-                                    fetchFiles(path.join(currentPath, file.name));
-                                  }
+                                onDoubleClick={(e) => {
+                                  e.preventDefault(); // Prevent default double-click behavior as single click handles it
                                 }}
                                 className={`flex flex-col items-center justify-center p-3 md:p-6 rounded-xl cursor-pointer transition-all border ${isSelected ? 'bg-blue-500/20 border-blue-500/50 shadow-[0_0_15px_rgba(59,130,246,0.15)]' : 'bg-transparent border-transparent hover:bg-white/5'}`}
                               >
