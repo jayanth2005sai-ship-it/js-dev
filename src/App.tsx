@@ -919,7 +919,7 @@ export default function App() {
   };
 
   const apps: AppIcon[] = [
-    { id: 'files', name: 'Files', icon: <FolderOpen size={32} />, color: 'bg-blue-500', action: () => { setActiveModal('files'); fetchFiles(); } },
+    { id: 'files', name: 'Files', icon: <FolderOpen size={32} />, color: 'bg-blue-500', action: () => { setActiveModal('files'); fetchFiles('/home'); } },
     { id: 'terminal', name: 'Terminal', icon: <TerminalIcon size={32} />, color: 'bg-zinc-800', action: () => setActiveModal('terminal') },
     { id: 'browser', name: 'Browser', icon: <Globe size={32} />, color: 'bg-orange-500' },
     { id: 'security', name: 'Security', icon: <Shield size={32} />, color: 'bg-emerald-500' },
@@ -2203,7 +2203,7 @@ export default function App() {
             <LayoutGrid size={24} />
           </button>
           <div className="w-px h-6 bg-white/10" />
-          <button onClick={() => { setActiveModal('files'); fetchFiles(); }} className="p-2 hover:bg-white/10 rounded-xl transition-all">
+          <button onClick={() => { setActiveModal('files'); fetchFiles('/home'); }} className="p-2 hover:bg-white/10 rounded-xl transition-all">
             <FolderOpen size={24} />
           </button>
           <button onClick={() => setActiveModal('terminal')} className="p-2 hover:bg-white/10 rounded-xl transition-all">

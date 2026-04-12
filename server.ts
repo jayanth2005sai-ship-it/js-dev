@@ -32,6 +32,8 @@ const setupDirectories = async () => {
       if (!fsSync.existsSync(dir)) {
         await fs.mkdir(dir, { recursive: true });
         console.log(`Created directory: ${dir}`);
+      } else {
+        console.log(`Directory already exists: ${dir}`);
       }
       // Try to ensure it's writable
       try {
@@ -41,9 +43,6 @@ const setupDirectories = async () => {
       }
     } catch (e: any) {
       console.warn(`Note: Could not manage directory ${dir} (${e.message}). This is normal in restricted environments.`);
-      
-      // Fallback: if we can't use /home, the app will naturally fallback to os.homedir() 
-      // which is handled in the API routes.
     }
   }
 };
