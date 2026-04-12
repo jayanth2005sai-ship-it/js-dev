@@ -1181,9 +1181,9 @@ export default function App() {
                         <div className="space-y-1">
                           {[
                             { path: '/home', icon: <Home size={18} />, label: 'Home' },
-                            { path: '/home/Documents', icon: <FileText size={18} />, label: 'Documents' },
-                            { path: '/home/Images', icon: <ImageIcon size={18} />, label: 'Images' },
-                            { path: '/home/Downloads', icon: <Download size={18} />, label: 'Downloads' },
+                            { path: '/Documents', icon: <FileText size={18} />, label: 'Documents' },
+                            { path: '/Images', icon: <ImageIcon size={18} />, label: 'Images' },
+                            { path: '/Downloads', icon: <Download size={18} />, label: 'Downloads' },
                           ].map((item) => (
                             <button 
                               key={item.path}
