@@ -56,7 +56,18 @@ const upload = multer({ storage });
 const fileExplorerStorage = multer.diskStorage({
   destination: (req, file, cb) => {
     const targetPath = req.headers['x-target-dir'] as string || os.homedir();
-    cb(null, targetPath);
+    
+    if (targetPath.startsWith('/mnt')) {
+      cb(new Error(`Permission denied: Cannot upload to ${targetPath}`), targetPath);
+      return;
+    }
+
+    try {
+      fsSync.accessSync(targetPath, fsSync.constants.W_OK);
+      cb(null, targetPath);
+    } catch (err) {
+      cb(new Error(`Permission denied: Cannot write to ${targetPath}`), targetPath);
+    }
   },
   filename: (req, file, cb) => {
     cb(null, file.originalname);
@@ -284,8 +295,9 @@ async function startServer() {
         };
       }));
       res.json({ path: targetPath, files: result });
-    } catch (error) {
-      res.status(500).json({ error: "Failed to read directory" });
+    } catch (error: any) {
+      console.error(`Failed to read directory ${targetPath}:`, error);
+      res.status(500).json({ error: "Failed to read directory", details: error.message });
     }
   });
 
