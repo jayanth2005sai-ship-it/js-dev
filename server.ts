@@ -430,6 +430,9 @@ async function startServer() {
       res.download(resolvedPath, (err) => {
         if (err) {
           console.error(`Download error for ${resolvedPath}:`, err);
+          if (!res.headersSent) {
+            res.status(500).json({ error: "Failed to download file", details: err.message });
+          }
         }
       });
     } catch (error: any) {

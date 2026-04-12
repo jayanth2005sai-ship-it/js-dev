@@ -196,14 +196,16 @@ export default function App() {
       const loadImg = async () => {
         setIsPreviewLoading(true);
         try {
-          const response = await fetch(`/api/files/raw?path=${encodeURIComponent(path.join(currentPath, previewFile.name))}`, {
+          const response = await fetch(getMediaUrl(path.join(currentPath, previewFile.name)), {
             headers: getAuthHeaders()
           });
           if (response.ok) {
             const blob = await response.blob();
+            console.log("Image blob loaded:", blob.size, blob.type);
             const url = URL.createObjectURL(blob);
             setPreviewImageUrl(url);
           } else {
+            console.error("Failed to load image preview. Status:", response.status, response.statusText);
             setPreviewImageUrl(null);
           }
         } catch (e) {
