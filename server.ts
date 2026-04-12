@@ -17,14 +17,15 @@ import { WebSocketServer } from "ws";
 
 // Create necessary directories for the file explorer to look like a real OS
 const setupDirectories = async () => {
-  const homeDir = os.homedir();
   const dirs = [
-    path.join(homeDir, 'Documents'),
-    path.join(homeDir, 'Images'),
-    path.join(homeDir, 'Downloads'),
+    '/home',
+    '/home/Documents',
+    '/home/Images',
+    '/home/Downloads',
+    '/mnt'
   ];
   
-  console.log(`Setting up system directories in ${homeDir}...`);
+  console.log("Setting up system directories...");
   
   for (const dir of dirs) {
     try {
@@ -44,16 +45,6 @@ const setupDirectories = async () => {
       console.warn(`Note: Could not manage directory ${dir} (${e.message}). This is normal in restricted environments.`);
     }
   }
-};
-
-const resolvePath = (targetPath: string) => {
-  if (targetPath.startsWith('/home/')) {
-    return path.join(os.homedir(), targetPath.substring(6));
-  }
-  if (targetPath === '/home') {
-    return os.homedir();
-  }
-  return targetPath;
 };
 
 const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(32).toString('hex');
@@ -330,7 +321,7 @@ async function startServer() {
 
   // File Explorer API
   app.get("/api/files", requireAuth, async (req, res) => {
-    const targetPath = resolvePath((req.query.path as string) || '/home');
+    const targetPath = (req.query.path as string) || os.homedir();
     try {
       // Ensure directory exists
       if (!fsSync.existsSync(targetPath)) {
@@ -395,7 +386,7 @@ async function startServer() {
       return;
     }
     try {
-      const resolvedPath = path.resolve(resolvePath(targetPath));
+      const resolvedPath = path.resolve(targetPath);
       console.log(`[RAW] Resolved path: ${resolvedPath}`);
       const stat = await fs.stat(resolvedPath);
       if (stat.isDirectory()) {
@@ -418,21 +409,18 @@ async function startServer() {
     }
     try {
       console.log(`Attempting to download: ${targetPath}`);
-      const stat = await fs.stat(resolvePath(targetPath));
+      const stat = await fs.stat(targetPath);
       if (stat.isDirectory()) {
         res.status(400).json({ error: "Cannot download directory directly" });
         return;
       }
       
-      const resolvedPath = path.resolve(resolvePath(targetPath));
+      const resolvedPath = path.resolve(targetPath);
       console.log(`Resolved path: ${resolvedPath}`);
       
       res.download(resolvedPath, (err) => {
         if (err) {
           console.error(`Download error for ${resolvedPath}:`, err);
-          if (!res.headersSent) {
-            res.status(500).json({ error: "Failed to download file", details: err.message });
-          }
         }
       });
     } catch (error: any) {
@@ -445,7 +433,7 @@ async function startServer() {
   app.post("/api/files/permissions", requireAuth, async (req, res) => {
     const { filePath, mode } = req.body;
     try {
-      await fs.chmod(resolvePath(filePath), parseInt(mode, 8));
+      await fs.chmod(filePath, parseInt(mode, 8));
       res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: "Failed to change permissions", details: error.message });
@@ -473,12 +461,11 @@ async function startServer() {
 
     for (const file of files) {
       try {
-        const resolvedFile = resolvePath(file);
-        const stat = await fs.stat(resolvedFile);
+        const stat = await fs.stat(file);
         if (stat.isDirectory()) {
-          archive.directory(resolvedFile, path.basename(resolvedFile));
+          archive.directory(file, path.basename(file));
         } else {
-          archive.file(resolvedFile, { name: path.basename(resolvedFile) });
+          archive.file(file, { name: path.basename(file) });
         }
       } catch (err) {
         console.error(`Error adding file ${file} to archive:`, err);
@@ -498,12 +485,11 @@ async function startServer() {
 
     try {
       for (const file of files) {
-        const resolvedFile = resolvePath(file);
-        const stat = await fs.stat(resolvedFile);
+        const stat = await fs.stat(file);
         if (stat.isDirectory()) {
-          await fs.rm(resolvedFile, { recursive: true, force: true });
+          await fs.rm(file, { recursive: true, force: true });
         } else {
-          await fs.unlink(resolvedFile);
+          await fs.unlink(file);
         }
       }
       res.json({ success: true });
@@ -520,7 +506,7 @@ async function startServer() {
       return;
     }
     try {
-      const dirPath = path.join(resolvePath(targetPath), name);
+      const dirPath = path.join(targetPath, name);
       await fs.mkdir(dirPath, { recursive: true });
       res.json({ success: true });
     } catch (error: any) {
@@ -536,7 +522,7 @@ async function startServer() {
       return;
     }
     try {
-      await fs.rename(resolvePath(oldPath), resolvePath(newPath));
+      await fs.rename(oldPath, newPath);
       res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: error.message || "Failed to rename file" });
