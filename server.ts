@@ -46,7 +46,6 @@ const setupDirectories = async () => {
     }
   }
 };
-setupDirectories();
 
 const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(32).toString('hex');
 
@@ -116,6 +115,8 @@ const uploadFileExplorer = multer({
 async function startServer() {
   const app = express();
   const PORT = 3000;
+
+  await setupDirectories();
 
   app.use(cookieParser());
   
@@ -322,6 +323,10 @@ async function startServer() {
   app.get("/api/files", requireAuth, async (req, res) => {
     const targetPath = (req.query.path as string) || os.homedir();
     try {
+      // Ensure directory exists
+      if (!fsSync.existsSync(targetPath)) {
+        await fs.mkdir(targetPath, { recursive: true });
+      }
       const files = await fs.readdir(targetPath, { withFileTypes: true });
       const result = await Promise.all(files.map(async file => {
         const filePath = path.join(targetPath, file.name);
