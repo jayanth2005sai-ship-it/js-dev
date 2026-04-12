@@ -328,13 +328,23 @@ async function startServer() {
       return;
     }
     try {
+      console.log(`Attempting to download: ${targetPath}`);
       const stat = await fs.stat(targetPath);
       if (stat.isDirectory()) {
         res.status(400).json({ error: "Cannot download directory directly" });
         return;
       }
-      res.download(path.resolve(targetPath));
+      
+      const resolvedPath = path.resolve(targetPath);
+      console.log(`Resolved path: ${resolvedPath}`);
+      
+      res.download(resolvedPath, (err) => {
+        if (err) {
+          console.error(`Download error for ${resolvedPath}:`, err);
+        }
+      });
     } catch (error: any) {
+      console.error(`Failed to download file ${targetPath}:`, error);
       res.status(500).json({ error: "Failed to download file", details: error.message });
     }
   });
