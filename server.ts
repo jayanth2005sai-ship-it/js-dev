@@ -130,6 +130,11 @@ async function startServer() {
       token = authHeader.substring(7);
     }
 
+    // Support token in query string for media elements (video/audio/img)
+    if (!token && req.query.token) {
+      token = req.query.token as string;
+    }
+
     if (!token) {
       res.status(401).json({ error: "Unauthorized" });
       return;

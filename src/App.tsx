@@ -257,6 +257,12 @@ export default function App() {
     return token ? { 'Authorization': `Bearer ${token}` } : {};
   };
 
+  const getMediaUrl = (filePath: string) => {
+    const token = localStorage.getItem('auth_token');
+    const baseUrl = `/api/files/raw?path=${encodeURIComponent(filePath)}`;
+    return token ? `${baseUrl}&token=${token}` : baseUrl;
+  };
+
   useEffect(() => {
     const checkAuth = async () => {
       try {
@@ -2078,7 +2084,7 @@ export default function App() {
                                 ) : previewFile.name.match(/\.(mp4|webm)$/i) ? (
                                   <div className="w-full h-full flex items-center justify-center">
                                     <video 
-                                      src={`/api/files/raw?path=${encodeURIComponent(path.join(currentPath, previewFile.name))}`} 
+                                      src={getMediaUrl(path.join(currentPath, previewFile.name))} 
                                       controls 
                                       autoPlay
                                       crossOrigin="use-credentials"
@@ -2088,9 +2094,10 @@ export default function App() {
                                 ) : previewFile.name.match(/\.(mp3|wav|ogg)$/i) ? (
                                   <div className="w-full h-full flex items-center justify-center">
                                     <audio 
-                                      src={`/api/files/raw?path=${encodeURIComponent(path.join(currentPath, previewFile.name))}`} 
+                                      src={getMediaUrl(path.join(currentPath, previewFile.name))} 
                                       controls 
                                       autoPlay
+                                      crossOrigin="use-credentials"
                                       className="w-full max-w-md" 
                                     />
                                   </div>
