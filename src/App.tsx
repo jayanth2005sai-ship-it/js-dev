@@ -92,7 +92,8 @@ const path = {
   extname: (p: string) => {
     const match = p.match(/\.[^.]+$/);
     return match ? match[0] : '';
-  }
+  },
+  basename: (p: string) => p.split('/').pop() || ''
 };
 
 // Helper component for highlighting fuzzy search matches
@@ -333,7 +334,7 @@ export default function App() {
         setPreviewFile(null); // Clear preview on navigate
       } else {
         const errorData = await response.json().catch(() => ({}));
-        setFileError(errorData.error || "Failed to fetch files. Permission denied or path does not exist.");
+        setFileError(errorData.error + (errorData.details ? `: ${errorData.details}` : "") || "Failed to fetch files. Permission denied or path does not exist.");
       }
     } catch (error: any) {
       console.error("Failed to fetch files:", error);
