@@ -350,13 +350,23 @@ export default function App() {
     
     try {
       for (const filePath of filePaths) {
-        // Create an invisible anchor to trigger the download
+        const response = await fetch(`/api/files/download?path=${encodeURIComponent(filePath)}`, {
+          headers: getAuthHeaders()
+        });
+        
+        if (!response.ok) {
+          throw new Error(`Failed to download: ${response.statusText}`);
+        }
+        
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
-        a.href = `/api/files/download?path=${encodeURIComponent(filePath)}`;
+        a.href = url;
         a.download = path.basename(filePath);
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
         
         // Small delay to prevent browser from blocking multiple downloads
         await new Promise(resolve => setTimeout(resolve, 500));
@@ -1181,9 +1191,9 @@ export default function App() {
                         <div className="space-y-1">
                           {[
                             { path: '/home', icon: <Home size={18} />, label: 'Home' },
-                            { path: '/Documents', icon: <FileText size={18} />, label: 'Documents' },
-                            { path: '/Images', icon: <ImageIcon size={18} />, label: 'Images' },
-                            { path: '/Downloads', icon: <Download size={18} />, label: 'Downloads' },
+                            { path: '/uploads/Documents', icon: <FileText size={18} />, label: 'Documents' },
+                            { path: '/uploads/Images', icon: <ImageIcon size={18} />, label: 'Images' },
+                            { path: '/uploads/Downloads', icon: <Download size={18} />, label: 'Downloads' },
                           ].map((item) => (
                             <button 
                               key={item.path}
