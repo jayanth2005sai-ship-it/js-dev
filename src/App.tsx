@@ -50,7 +50,11 @@ import {
   Laptop,
   Database as DatabaseIcon,
   Settings as SettingsIcon,
-  ClipboardList
+  ClipboardList,
+  Menu,
+  Eye,
+  CheckCircle2,
+  AlertCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Fuse, { FuseResultMatch } from 'fuse.js';
@@ -83,6 +87,14 @@ interface FileItem {
   created: string;
   accessed: string;
   permissions: string;
+}
+
+interface UploadTask {
+  id: string;
+  fileName: string;
+  progress: number;
+  status: 'uploading' | 'completed' | 'error';
+  error?: string;
 }
 
 // Path helpers for frontend
@@ -146,6 +158,7 @@ export default function App() {
   const [files, setFiles] = useState<FileItem[]>([]);
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
   const [isSelectMode, setIsSelectMode] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [fileSearchQuery, setFileSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
@@ -155,6 +168,10 @@ export default function App() {
   const [newFileName, setNewFileName] = useState('');
   const [moveFile, setMoveFile] = useState<FileItem | null>(null);
   const [moveDestination, setMoveDestination] = useState('');
+  const [isSearchExpanded, setIsSearchExpanded] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const [uploadTasks, setUploadTasks] = useState<UploadTask[]>([]);
+  const [showUploadComplete, setShowUploadComplete] = useState(false);
   const [editingPermissionsFile, setEditingPermissionsFile] = useState<FileItem | null>(null);
   const [newPermissions, setNewPermissions] = useState('');
   const [fileError, setFileError] = useState<string | null>(null);
@@ -529,32 +546,98 @@ export default function App() {
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0) return;
     setFileError(null);
+    setShowUploadComplete(false);
     
-    const formData = new FormData();
-    for (let i = 0; i < e.target.files.length; i++) {
-      formData.append('files', e.target.files[i]);
-    }
+    const filesToUpload = Array.from(e.target.files);
+    const newTasks: UploadTask[] = filesToUpload.map(file => ({
+      id: Math.random().toString(36).substr(2, 9),
+      fileName: file.name,
+      progress: 0,
+      status: 'uploading'
+    }));
+
+    setUploadTasks(prev => [...prev, ...newTasks]);
+
+    const uploadFile = (file: File, task: UploadTask) => {
+      return new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        const formData = new FormData();
+        formData.append('files', file);
+
+        xhr.upload.addEventListener('progress', (event) => {
+          if (event.lengthComputable) {
+            const percent = Math.round((event.loaded / event.total) * 100);
+            setUploadTasks(prev => prev.map(t => 
+              t.id === task.id ? { ...t, progress: percent } : t
+            ));
+          }
+        });
+
+        xhr.addEventListener('load', () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            setUploadTasks(prev => prev.map(t => 
+              t.id === task.id ? { ...t, status: 'completed', progress: 100 } : t
+            ));
+            resolve();
+          } else {
+            let errorMsg = `Upload failed (${xhr.status})`;
+            try {
+              const response = JSON.parse(xhr.responseText);
+              errorMsg = response.error || errorMsg;
+            } catch (e) {
+              if (xhr.status === 413) {
+                errorMsg = "File is too large for the server to process (Max 2GB). The request was likely rejected by a proxy or firewall.";
+              } else if (xhr.responseText) {
+                errorMsg = xhr.responseText.length > 100 
+                  ? xhr.responseText.substring(0, 100) + '...' 
+                  : xhr.responseText;
+              }
+            }
+            
+            console.error(`[FRONTEND] Upload error (${xhr.status}):`, xhr.responseText);
+            setUploadTasks(prev => prev.map(t => 
+              t.id === task.id ? { ...t, status: 'error', error: errorMsg } : t
+            ));
+            reject(new Error(errorMsg));
+          }
+        });
+
+        xhr.addEventListener('error', () => {
+          const errorMsg = "Network error or request blocked";
+          setUploadTasks(prev => prev.map(t => 
+            t.id === task.id ? { ...t, status: 'error', error: errorMsg } : t
+          ));
+          reject(new Error(errorMsg));
+        });
+
+        xhr.open('POST', '/api/files/upload');
+        const headers = getAuthHeaders();
+        Object.entries(headers).forEach(([key, value]) => {
+          xhr.setRequestHeader(key, value as string);
+        });
+        console.log(`[FRONTEND] Uploading ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB) to: ${currentPath || 'default home'}`);
+        xhr.setRequestHeader('x-target-dir', currentPath);
+        xhr.withCredentials = true;
+        xhr.send(formData);
+      });
+    };
 
     try {
-      const response = await fetch('/api/files/upload', {
-        method: 'POST',
-        headers: {
-          ...getAuthHeaders(),
-          'x-target-dir': currentPath
-        },
-        credentials: 'include',
-        body: formData
-      });
+      const results = await Promise.allSettled(filesToUpload.map((file, index) => uploadFile(file, newTasks[index])));
+      fetchFiles(currentPath);
       
-      if (response.ok) {
-        fetchFiles(currentPath); // Refresh directory
+      const failed = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+      if (failed.length === 0) {
+        setShowUploadComplete(true);
+        setTimeout(() => setShowUploadComplete(false), 5000);
       } else {
-        const errorData = await response.json().catch(() => ({}));
-        setFileError(errorData.error || "Failed to upload files.");
+        const firstError = failed[0].reason?.message || "Unknown upload error";
+        console.error(`${failed.length} uploads failed. First error: ${firstError}`);
+        setFileError(`${failed.length} file(s) failed to upload: ${firstError}`);
       }
-    } catch (error: any) {
-      console.error("Error uploading files:", error);
-      setFileError(error.message || "Network error while uploading files.");
+    } catch (error) {
+      console.error("Unexpected error during upload process:", error);
+      setFileError("An unexpected error occurred during upload.");
     }
     
     // Clear input
@@ -829,6 +912,238 @@ export default function App() {
       </div>
     );
   }
+
+  const renderSidebarContent = (isMobile = false) => (
+    <>
+      <div className="p-4">
+        <h3 className="text-xs font-semibold text-white/40 mb-3 tracking-wider uppercase">Quick Access</h3>
+        <div className="space-y-1">
+          {[
+            { path: '/home', icon: <Home size={18} />, label: 'Home' },
+            { path: '/home/Documents', icon: <FileText size={18} />, label: 'Documents' },
+            { path: '/home/Images', icon: <ImageIcon size={18} />, label: 'Images' },
+            { path: '/home/Downloads', icon: <Download size={18} />, label: 'Downloads' },
+          ].map((item) => (
+            <button 
+              key={item.path}
+              onClick={() => {
+                fetchFiles(item.path);
+                if (isMobile) setIsSidebarOpen(false);
+              }} 
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={async (e) => {
+                e.preventDefault();
+                const sourceFileName = e.dataTransfer.getData('text/plain');
+                if (sourceFileName) {
+                  try {
+                    const response = await fetch('/api/files/rename', {
+                      method: 'POST',
+                      headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
+                      },
+                      body: JSON.stringify({ 
+                        oldPath: path.join(currentPath, sourceFileName),
+                        newPath: path.join(item.path, sourceFileName)
+                      })
+                    });
+                    if (response.ok) {
+                      fetchFiles(currentPath);
+                    } else {
+                      const data = await response.json().catch(() => ({}));
+                      setFileError(data.error || "Failed to move file");
+                    }
+                  } catch (error: any) {
+                    setFileError(error.message || "Failed to move file");
+                  }
+                }
+              }}
+              className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg font-medium transition-colors ${currentPath === item.path ? 'bg-white/10 text-white' : 'text-white/60 hover:bg-white/5 hover:text-white'}`}
+            >
+              {item.icon} {item.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="p-4">
+        <h3 className="text-xs font-semibold text-white/40 mb-3 tracking-wider uppercase">Storage</h3>
+        <div className="space-y-1">
+          {[
+            { path: '/', icon: <HardDrive size={18} />, label: '/' },
+            { path: '/mnt', icon: <HardDrive size={18} />, label: '/mnt' },
+          ].map((item) => (
+            <button 
+              key={item.path}
+              onClick={() => {
+                fetchFiles(item.path);
+                if (isMobile) setIsSidebarOpen(false);
+              }} 
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={async (e) => {
+                e.preventDefault();
+                const sourceFileName = e.dataTransfer.getData('text/plain');
+                if (sourceFileName) {
+                  try {
+                    const response = await fetch('/api/files/rename', {
+                      method: 'POST',
+                      headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
+                      },
+                      body: JSON.stringify({ 
+                        oldPath: path.join(currentPath, sourceFileName),
+                        newPath: path.join(item.path, sourceFileName)
+                      })
+                    });
+                    if (response.ok) {
+                      fetchFiles(currentPath);
+                    } else {
+                      const data = await response.json().catch(() => ({}));
+                      setFileError(data.error || "Failed to move file");
+                    }
+                  } catch (error: any) {
+                    setFileError(error.message || "Failed to move file");
+                  }
+                }
+              }}
+              className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg font-medium transition-colors ${currentPath === item.path ? 'bg-white/10 text-white' : 'text-white/60 hover:bg-white/5 hover:text-white'}`}
+            >
+              {item.icon} {item.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="mt-auto p-4 border-t border-white/10">
+         <p className="text-xs text-white/40">Disk usage</p>
+         <div className="w-full h-1.5 bg-white/10 rounded-full mt-2 overflow-hidden">
+           <div className="h-full bg-blue-500" style={{ width: `${systemStats.disk.usagePercent}%` }}></div>
+         </div>
+      </div>
+    </>
+  );
+
+  const renderFileInfoContent = () => {
+    const selectedFileObj = selectedFiles.size === 1 ? files.find(f => f.name === Array.from(selectedFiles)[0]) : null;
+    if (selectedFileObj) {
+      return (
+        <>
+          <div className="flex justify-between items-start mb-6">
+            <div className="w-16 h-16 bg-white/5 rounded-xl flex items-center justify-center">
+              {getFileIcon(selectedFileObj, 32)}
+            </div>
+            <button 
+              onClick={() => setSelectedFiles(new Set())}
+              className="text-white/40 hover:text-white transition-colors"
+              title="Close"
+            >
+              <X size={20} />
+            </button>
+          </div>
+          <h2 className="text-xl font-semibold mb-8 truncate" title={selectedFileObj.name}>{selectedFileObj.name}</h2>
+          
+          <div className="mb-8">
+            <h3 className="text-xs font-semibold text-white/40 mb-4 tracking-wider uppercase">File Info</h3>
+            <div className="space-y-3 text-sm">
+              <div className="flex justify-between"><span className="text-white/60">Size</span><span>{formatBytes(selectedFileObj.size)}</span></div>
+              <div className="flex justify-between"><span className="text-white/60">Modified</span><span>{new Date(selectedFileObj.modified).toLocaleDateString()}</span></div>
+              <div className="flex justify-between"><span className="text-white/60">Owner</span><span>root</span></div>
+              <div className="flex justify-between"><span className="text-white/60">Perms</span><span className="font-mono">{selectedFileObj.permissions}</span></div>
+            </div>
+          </div>
+
+          <div>
+            <h3 className="text-xs font-semibold text-white/40 mb-4 tracking-wider uppercase">Metadata DB</h3>
+            <p className="text-sm text-white/60">No tags yet</p>
+            <p className="text-sm text-white/40 mt-2">--</p>
+          </div>
+        </>
+      );
+    } else if (selectedFiles.size > 1) {
+      return (
+        <div className="h-full flex flex-col items-center justify-center text-white/40 relative">
+          <button 
+            onClick={() => setSelectedFiles(new Set())}
+            className="absolute top-0 right-0 text-white/40 hover:text-white transition-colors"
+            title="Close"
+          >
+            <X size={20} />
+          </button>
+          <ClipboardList size={48} className="mb-4 opacity-20" />
+          <p>{selectedFiles.size} files selected</p>
+        </div>
+      );
+    }
+    return null;
+  };
+
+  const renderFileInfoActions = () => {
+    if (selectedFiles.size === 0) return null;
+    return (
+      <div className="p-4 border-t border-white/10 space-y-2">
+        {selectedFiles.size === 1 && (() => {
+          const selectedFileObj = files.find(f => f.name === Array.from(selectedFiles)[0]);
+          if (!selectedFileObj) return null;
+          return (
+            <>
+              {!selectedFileObj.isDirectory && (
+                <button 
+                  onClick={() => {
+                    setPreviewFile(selectedFileObj);
+                    if (window.innerWidth < 768) {
+                      setSelectedFiles(new Set());
+                    }
+                  }} 
+                  className="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white transition-colors flex items-center justify-center gap-2 text-sm font-medium shadow-lg shadow-blue-500/20"
+                >
+                  Preview <Eye size={16} />
+                </button>
+              )}
+              <button 
+                onClick={() => { 
+                  setRenameFile(selectedFileObj); 
+                  setNewFileName(selectedFileObj.name); 
+                  if (window.innerWidth < 768) {
+                    setSelectedFiles(new Set());
+                  }
+                }} 
+                className="w-full py-2.5 rounded-xl border border-white/10 hover:bg-white/5 transition-colors flex items-center justify-center gap-2 text-sm font-medium"
+              >
+                Rename <ArrowUpRight size={16} className="text-white/40" />
+              </button>
+              <button 
+                onClick={() => { 
+                  setMoveFile(selectedFileObj); 
+                  setMoveDestination(currentPath); 
+                  if (window.innerWidth < 768) {
+                    setSelectedFiles(new Set());
+                  }
+                }} 
+                className="w-full py-2.5 rounded-xl border border-white/10 hover:bg-white/5 transition-colors flex items-center justify-center gap-2 text-sm font-medium"
+              >
+                Move <ArrowUpRight size={16} className="text-white/40" />
+              </button>
+            </>
+          );
+        })()}
+        <button onClick={handleDownloadSelected} className="w-full py-2.5 rounded-xl border border-white/10 hover:bg-white/5 transition-colors flex items-center justify-center gap-2 text-sm font-medium">
+          Download <Download size={16} className="text-white/40" />
+        </button>
+        {showDeleteConfirm ? (
+          <div className="w-full p-3 rounded-xl border border-red-500/30 bg-red-500/10 flex flex-col gap-2">
+            <p className="text-sm text-red-200 text-center">Delete {selectedFiles.size} item(s)?</p>
+            <div className="flex gap-2">
+              <button onClick={handleDeleteSelected} className="flex-1 py-1.5 bg-red-600 hover:bg-red-500 text-white rounded-lg text-sm font-medium transition-colors">Yes</button>
+              <button onClick={() => setShowDeleteConfirm(false)} className="flex-1 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-lg text-sm font-medium transition-colors">No</button>
+            </div>
+          </div>
+        ) : (
+          <button onClick={() => setShowDeleteConfirm(true)} className="w-full py-2.5 rounded-xl border border-red-500/20 text-red-400 hover:bg-red-500/10 transition-colors flex items-center justify-center gap-2 text-sm font-medium">
+            Delete <X size={16} className="text-red-400/60" />
+          </button>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white font-sans selection:bg-blue-500/30 overflow-hidden relative">
@@ -1184,113 +1499,54 @@ export default function App() {
                   </div>
                 ) : activeModal === 'files' ? (
                   <div className="h-full flex bg-[#1e1e1e] text-white">
-                    {/* Left Sidebar */}
-                    <div className="w-64 bg-[#1a1a1a] border-r border-white/10 flex flex-col shrink-0">
-                      <div className="p-4">
-                        <h3 className="text-xs font-semibold text-white/40 mb-3 tracking-wider">QUICK ACCESS</h3>
-                        <div className="space-y-1">
-                          {[
-                            { path: '/home', icon: <Home size={18} />, label: 'Home' },
-                            { path: '/uploads/Documents', icon: <FileText size={18} />, label: 'Documents' },
-                            { path: '/uploads/Images', icon: <ImageIcon size={18} />, label: 'Images' },
-                            { path: '/uploads/Downloads', icon: <Download size={18} />, label: 'Downloads' },
-                          ].map((item) => (
-                            <button 
-                              key={item.path}
-                              onClick={() => fetchFiles(item.path)} 
-                              onDragOver={(e) => e.preventDefault()}
-                              onDrop={async (e) => {
-                                e.preventDefault();
-                                const sourceFileName = e.dataTransfer.getData('text/plain');
-                                if (sourceFileName) {
-                                  try {
-                                    const response = await fetch('/api/files/rename', {
-                                      method: 'POST',
-                                      headers: {
-                                        'Content-Type': 'application/json',
-                                        ...getAuthHeaders()
-                                      },
-                                      body: JSON.stringify({ 
-                                        oldPath: path.join(currentPath, sourceFileName),
-                                        newPath: path.join(item.path, sourceFileName)
-                                      })
-                                    });
-                                    if (response.ok) {
-                                      fetchFiles(currentPath);
-                                    } else {
-                                      const data = await response.json().catch(() => ({}));
-                                      setFileError(data.error || "Failed to move file");
-                                    }
-                                  } catch (error: any) {
-                                    setFileError(error.message || "Failed to move file");
-                                  }
-                                }
-                              }}
-                              className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg font-medium transition-colors ${currentPath === item.path ? 'bg-white/10 text-white' : 'text-white/60 hover:bg-white/5 hover:text-white'}`}
-                            >
-                              {item.icon} {item.label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                      <div className="p-4">
-                        <h3 className="text-xs font-semibold text-white/40 mb-3 tracking-wider">STORAGE</h3>
-                        <div className="space-y-1">
-                          {[
-                            { path: '/', icon: <HardDrive size={18} />, label: '/' },
-                            { path: '/mnt', icon: <HardDrive size={18} />, label: '/mnt' },
-                          ].map((item) => (
-                            <button 
-                              key={item.path}
-                              onClick={() => fetchFiles(item.path)} 
-                              onDragOver={(e) => e.preventDefault()}
-                              onDrop={async (e) => {
-                                e.preventDefault();
-                                const sourceFileName = e.dataTransfer.getData('text/plain');
-                                if (sourceFileName) {
-                                  try {
-                                    const response = await fetch('/api/files/rename', {
-                                      method: 'POST',
-                                      headers: {
-                                        'Content-Type': 'application/json',
-                                        ...getAuthHeaders()
-                                      },
-                                      body: JSON.stringify({ 
-                                        oldPath: path.join(currentPath, sourceFileName),
-                                        newPath: path.join(item.path, sourceFileName)
-                                      })
-                                    });
-                                    if (response.ok) {
-                                      fetchFiles(currentPath);
-                                    } else {
-                                      const data = await response.json().catch(() => ({}));
-                                      setFileError(data.error || "Failed to move file");
-                                    }
-                                  } catch (error: any) {
-                                    setFileError(error.message || "Failed to move file");
-                                  }
-                                }
-                              }}
-                              className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg font-medium transition-colors ${currentPath === item.path ? 'bg-white/10 text-white' : 'text-white/60 hover:bg-white/5 hover:text-white'}`}
-                            >
-                              {item.icon} {item.label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                      <div className="mt-auto p-4 border-t border-white/10">
-                         <p className="text-xs text-white/40">Disk usage</p>
-                         <div className="w-full h-1.5 bg-white/10 rounded-full mt-2 overflow-hidden">
-                           <div className="h-full bg-blue-500" style={{ width: `${systemStats.disk.usagePercent}%` }}></div>
-                         </div>
-                      </div>
+                    {/* Left Sidebar - Desktop */}
+                    <div className="hidden md:flex w-64 bg-[#1a1a1a] border-r border-white/10 flex-col shrink-0">
+                      {renderSidebarContent()}
                     </div>
+
+                    {/* Left Sidebar - Mobile Drawer */}
+                    <AnimatePresence>
+                      {isSidebarOpen && (
+                        <>
+                          <motion.div
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            onClick={() => setIsSidebarOpen(false)}
+                            className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm md:hidden"
+                          />
+                          <motion.div
+                            initial={{ x: '-100%' }}
+                            animate={{ x: 0 }}
+                            exit={{ x: '-100%' }}
+                            transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+                            className="fixed inset-y-0 left-0 z-[70] w-72 bg-[#1a1a1a] shadow-2xl md:hidden flex flex-col"
+                          >
+                            <div className="p-4 border-b border-white/5 flex items-center justify-between">
+                              <span className="font-bold">Quick Access</span>
+                              <button onClick={() => setIsSidebarOpen(false)} className="p-2 hover:bg-white/10 rounded-full">
+                                <X size={20} />
+                              </button>
+                            </div>
+                            <div className="flex-1 overflow-y-auto">
+                              {renderSidebarContent(true)}
+                            </div>
+                          </motion.div>
+                        </>
+                      )}
+                    </AnimatePresence>
 
                     {/* Middle Column */}
                     <div className="flex-1 flex flex-col min-w-0 bg-[#1e1e1e]">
                       {/* Top Bar */}
                       <div className="h-14 border-b border-white/10 flex items-center justify-between px-4 shrink-0">
                         <div className="flex items-center gap-2 text-sm overflow-hidden whitespace-nowrap">
+                          <button 
+                            onClick={() => setIsSidebarOpen(true)} 
+                            className="md:hidden p-2 hover:bg-white/10 rounded-lg text-white/60 hover:text-white shrink-0"
+                          >
+                            <Menu size={18} />
+                          </button>
                           <button onClick={() => fetchFiles(path.dirname(currentPath))} className="text-white/40 hover:text-white shrink-0"><ChevronLeft size={16} /></button>
                           <span className="text-white/40 truncate flex items-center">
                             {currentPath.split('/').map((part, i, arr) => {
@@ -1340,16 +1596,55 @@ export default function App() {
                           </span>
                         </div>
                         <div className="flex items-center gap-3">
-                          <div className="relative">
-                            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40" />
+                          <motion.div 
+                            initial={false}
+                            animate={{ width: isSearchExpanded ? (window.innerWidth < 768 ? 160 : 240) : 36 }}
+                            onHoverStart={() => setIsSearchExpanded(true)}
+                            onHoverEnd={() => !fileSearchQuery && setIsSearchExpanded(false)}
+                            className="relative h-9 bg-white/5 border border-white/10 rounded-lg overflow-hidden flex items-center"
+                          >
+                            <button 
+                              onClick={() => {
+                                if (isSearchExpanded && fileSearchQuery) {
+                                  setFileSearchQuery('');
+                                  setIsSearchExpanded(false);
+                                } else {
+                                  setIsSearchExpanded(!isSearchExpanded);
+                                  if (!isSearchExpanded) {
+                                    setTimeout(() => searchInputRef.current?.focus(), 100);
+                                  }
+                                }
+                              }}
+                              className="absolute left-0 top-0 bottom-0 w-9 flex items-center justify-center text-white/40 hover:text-white transition-colors z-10"
+                            >
+                              <Search size={16} />
+                            </button>
                             <input 
+                              ref={searchInputRef}
                               type="text" 
                               placeholder="Search files..." 
                               value={fileSearchQuery}
-                              onChange={(e) => setFileSearchQuery(e.target.value)}
-                              className="bg-white/5 border border-white/10 rounded-lg pl-9 pr-4 py-1.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500 w-48 lg:w-64" 
+                              onChange={(e) => {
+                                setFileSearchQuery(e.target.value);
+                                if (!isSearchExpanded) setIsSearchExpanded(true);
+                              }}
+                              onFocus={() => setIsSearchExpanded(true)}
+                              onBlur={() => !fileSearchQuery && setIsSearchExpanded(false)}
+                              className="bg-transparent border-none pl-9 pr-9 py-1.5 text-sm text-white focus:outline-none w-full" 
                             />
-                          </div>
+                            {fileSearchQuery && (
+                              <button 
+                                onClick={() => {
+                                  setFileSearchQuery('');
+                                  setIsSearchExpanded(false);
+                                  searchInputRef.current?.blur();
+                                }}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-white/20 hover:text-white transition-colors"
+                              >
+                                <X size={14} />
+                              </button>
+                            )}
+                          </motion.div>
                           <div className="flex items-center gap-1 border-l border-white/10 pl-3">
                             <button onClick={() => setIsCreatingFolder(true)} className="p-1.5 text-white/60 hover:text-white hover:bg-white/10 rounded-md transition-colors" title="New Folder">
                               <FolderPlus size={16} />
@@ -1373,7 +1668,63 @@ export default function App() {
                             <button onClick={() => setFileError(null)} className="hover:text-red-300 transition-colors"><X size={16} /></button>
                           </div>
                         )}
-                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 content-start">
+
+                        {/* Upload Tasks Overlay */}
+                        <AnimatePresence>
+                          {(uploadTasks.length > 0 || showUploadComplete) && (
+                            <motion.div 
+                              initial={{ opacity: 0, y: 20 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              exit={{ opacity: 0, y: 20 }}
+                              className="fixed bottom-6 right-6 z-[100] w-80 bg-[#1a1a1a] border border-white/10 rounded-2xl shadow-2xl overflow-hidden"
+                            >
+                              <div className="p-4 border-b border-white/10 flex items-center justify-between bg-white/5">
+                                <h4 className="text-sm font-semibold flex items-center gap-2">
+                                  {showUploadComplete ? (
+                                    <><CheckCircle2 size={16} className="text-green-500" /> Upload Complete</>
+                                  ) : (
+                                    <><Upload size={16} className="text-blue-500 animate-bounce" /> Uploading Files...</>
+                                  )}
+                                </h4>
+                                <button 
+                                  onClick={() => {
+                                    setUploadTasks([]);
+                                    setShowUploadComplete(false);
+                                  }}
+                                  className="text-white/40 hover:text-white transition-colors"
+                                >
+                                  <X size={16} />
+                                </button>
+                              </div>
+                              <div className="max-h-60 overflow-y-auto p-2 space-y-1">
+                                {uploadTasks.map(task => (
+                                  <div key={task.id} className="p-2 rounded-lg bg-white/5 border border-white/5">
+                                    <div className="flex items-center justify-between mb-1.5">
+                                      <span className="text-xs font-medium truncate flex-1 pr-2">{task.fileName}</span>
+                                      {task.status === 'completed' && <CheckCircle2 size={14} className="text-green-500 shrink-0" />}
+                                      {task.status === 'error' && <AlertCircle size={14} className="text-red-500 shrink-0" />}
+                                      {task.status === 'uploading' && <span className="text-[10px] text-white/40">{task.progress}%</span>}
+                                    </div>
+                                    {task.status === 'uploading' && (
+                                      <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden">
+                                        <motion.div 
+                                          initial={{ width: 0 }}
+                                          animate={{ width: `${task.progress}%` }}
+                                          className="h-full bg-blue-500"
+                                        />
+                                      </div>
+                                    )}
+                                    {task.status === 'error' && (
+                                      <p className="text-[10px] text-red-400 truncate">{task.error}</p>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-4 content-start">
                           {files.filter(f => f.name.toLowerCase().includes(fileSearchQuery.toLowerCase())).map((file) => {
                             const isSelected = selectedFiles.has(file.name);
                             return (
@@ -1397,21 +1748,31 @@ export default function App() {
                                     }
                                   }
                                 }}
-                                onClick={() => {
-                                  const newSelected = new Set([file.name]);
-                                  setSelectedFiles(newSelected);
+                                onClick={(e) => {
+                                  if (!file.isDirectory) {
+                                    const newSelected = new Set([file.name]);
+                                    setSelectedFiles(newSelected);
+                                  } else {
+                                    // For folders, single click just clears selection to avoid opening info panel
+                                    setSelectedFiles(new Set());
+                                  }
+                                }}
+                                onContextMenu={(e) => {
+                                  if (file.isDirectory) {
+                                    e.preventDefault();
+                                    const newSelected = new Set([file.name]);
+                                    setSelectedFiles(newSelected);
+                                  }
                                 }}
                                 onDoubleClick={() => {
                                   if (file.isDirectory) {
                                     fetchFiles(path.join(currentPath, file.name));
-                                  } else {
-                                    setPreviewFile(file);
                                   }
                                 }}
-                                className={`flex flex-col items-center justify-center p-4 rounded-xl cursor-pointer transition-all border ${isSelected ? 'bg-blue-500/20 border-blue-500/50 shadow-[0_0_15px_rgba(59,130,246,0.15)]' : 'bg-transparent border-transparent hover:bg-white/5'}`}
+                                className={`flex flex-col items-center justify-center p-3 md:p-6 rounded-xl cursor-pointer transition-all border ${isSelected ? 'bg-blue-500/20 border-blue-500/50 shadow-[0_0_15px_rgba(59,130,246,0.15)]' : 'bg-transparent border-transparent hover:bg-white/5'}`}
                               >
-                                <div className="mb-3">
-                                  {getFileIcon(file, 48)}
+                                <div className="mb-2 md:mb-3">
+                                  {getFileIcon(file, window.innerWidth < 768 ? 40 : 48)}
                                 </div>
                                 <span className="text-sm font-medium text-center break-all line-clamp-2 text-white/80">{file.name}</span>
                               </div>
@@ -1524,15 +1885,54 @@ export default function App() {
                               <div className="flex-1 overflow-auto bg-black/40 p-4">
                                 {previewFile.name.match(/\.(jpg|jpeg|png|gif|webp|svg|bmp|tiff|ico)$/i) ? (
                                   <div className="w-full h-full flex items-center justify-center">
-                                    <img src={`/api/files/download?path=${encodeURIComponent(path.join(currentPath, previewFile.name))}`} alt={previewFile.name} className="max-w-full max-h-full object-contain rounded-lg" />
+                                    <img 
+                                      src={`/api/files/download?path=${encodeURIComponent(path.join(currentPath, previewFile.name))}`} 
+                                      alt={previewFile.name} 
+                                      className="max-w-full max-h-full object-contain rounded-lg" 
+                                      onLoad={(e) => {
+                                        // This is a workaround to load images with auth headers
+                                        const img = e.target as HTMLImageElement;
+                                        fetch(img.src, { headers: getAuthHeaders() })
+                                          .then(res => res.blob())
+                                          .then(blob => {
+                                            img.src = URL.createObjectURL(blob);
+                                          });
+                                      }}
+                                    />
                                   </div>
                                 ) : previewFile.name.match(/\.(mp4|webm)$/i) ? (
                                   <div className="w-full h-full flex items-center justify-center">
-                                    <video src={`/api/files/download?path=${encodeURIComponent(path.join(currentPath, previewFile.name))}`} controls className="max-w-full max-h-full rounded-lg" />
+                                    <video 
+                                      src={`/api/files/download?path=${encodeURIComponent(path.join(currentPath, previewFile.name))}`} 
+                                      controls 
+                                      className="max-w-full max-h-full rounded-lg" 
+                                      onLoadedMetadata={(e) => {
+                                        // This is a workaround to load video with auth headers
+                                        const video = e.target as HTMLVideoElement;
+                                        fetch(video.src, { headers: getAuthHeaders() })
+                                          .then(res => res.blob())
+                                          .then(blob => {
+                                            video.src = URL.createObjectURL(blob);
+                                          });
+                                      }}
+                                    />
                                   </div>
                                 ) : previewFile.name.match(/\.(mp3|wav|ogg)$/i) ? (
                                   <div className="w-full h-full flex items-center justify-center">
-                                    <audio src={`/api/files/download?path=${encodeURIComponent(path.join(currentPath, previewFile.name))}`} controls className="w-full max-w-md" />
+                                    <audio 
+                                      src={`/api/files/download?path=${encodeURIComponent(path.join(currentPath, previewFile.name))}`} 
+                                      controls 
+                                      className="w-full max-w-md" 
+                                      onLoadedMetadata={(e) => {
+                                        // This is a workaround to load audio with auth headers
+                                        const audio = e.target as HTMLAudioElement;
+                                        fetch(audio.src, { headers: getAuthHeaders() })
+                                          .then(res => res.blob())
+                                          .then(blob => {
+                                            audio.src = URL.createObjectURL(blob);
+                                          });
+                                      }}
+                                    />
                                   </div>
                                 ) : previewContent ? (
                                   <SyntaxHighlighter
@@ -1561,86 +1961,52 @@ export default function App() {
                       </div>
                     </div>
 
-                    {/* Right Sidebar */}
-                    {selectedFiles.size > 0 && (
-                      <div className="w-72 bg-[#1a1a1a] border-l border-white/10 flex flex-col shrink-0">
-                        <div className="px-6 pt-6 pb-6 flex-1 overflow-y-auto">
-                          {(() => {
-                            const selectedFileObj = selectedFiles.size === 1 ? files.find(f => f.name === Array.from(selectedFiles)[0]) : null;
-                            if (selectedFileObj) {
-                              return (
-                                <>
-                                  <div className="flex justify-between items-start mb-6">
-                                    <div className="w-16 h-16 bg-white/5 rounded-xl flex items-center justify-center">
-                                      {getFileIcon(selectedFileObj, 32)}
-                                    </div>
-                                    <button className="text-white/40 hover:text-white"><MoreHorizontal size={20} /></button>
-                                  </div>
-                                  <h2 className="text-xl font-semibold mb-8 truncate" title={selectedFileObj.name}>{selectedFileObj.name}</h2>
-                                  
-                                  <div className="mb-8">
-                                    <h3 className="text-xs font-semibold text-white/40 mb-4 tracking-wider">FILE INFO</h3>
-                                    <div className="space-y-3 text-sm">
-                                      <div className="flex justify-between"><span className="text-white/60">Size</span><span>{formatBytes(selectedFileObj.size)}</span></div>
-                                      <div className="flex justify-between"><span className="text-white/60">Modified</span><span>{new Date(selectedFileObj.modified).toLocaleDateString()}</span></div>
-                                      <div className="flex justify-between"><span className="text-white/60">Owner</span><span>root</span></div>
-                                      <div className="flex justify-between"><span className="text-white/60">Perms</span><span className="font-mono">{selectedFileObj.permissions}</span></div>
-                                    </div>
-                                  </div>
+                    {/* Right Sidebar - Desktop */}
+                    <AnimatePresence>
+                      {selectedFiles.size > 0 && (
+                        <motion.div 
+                          initial={{ opacity: 0, x: 20 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          exit={{ opacity: 0, x: 20 }}
+                          className="hidden md:flex w-72 bg-[#1a1a1a] border-l border-white/10 flex-col shrink-0"
+                        >
+                          <div className="px-6 pt-6 pb-6 flex-1 overflow-y-auto">
+                            {renderFileInfoContent()}
+                          </div>
+                          {renderFileInfoActions()}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
 
-                                  <div>
-                                    <h3 className="text-xs font-semibold text-white/40 mb-4 tracking-wider">METADATA DB</h3>
-                                    <p className="text-sm text-white/60">No tags yet</p>
-                                    <p className="text-sm text-white/40 mt-2">--</p>
-                                  </div>
-                                </>
-                              );
-                            } else if (selectedFiles.size > 1) {
-                              return (
-                                <div className="h-full flex flex-col items-center justify-center text-white/40">
-                                  <ClipboardList size={48} className="mb-4 opacity-20" />
-                                  <p>{selectedFiles.size} files selected</p>
-                                </div>
-                              );
-                            }
-                            return null;
-                          })()}
-                        </div>
-                        
-                        <div className="p-4 border-t border-white/10 space-y-2">
-                          {selectedFiles.size === 1 && (() => {
-                            const selectedFileObj = files.find(f => f.name === Array.from(selectedFiles)[0]);
-                            if (!selectedFileObj) return null;
-                            return (
-                              <>
-                                <button onClick={() => { setRenameFile(selectedFileObj); setNewFileName(selectedFileObj.name); }} className="w-full py-2.5 rounded-xl border border-white/10 hover:bg-white/5 transition-colors flex items-center justify-center gap-2 text-sm font-medium">
-                                  Rename <ArrowUpRight size={16} className="text-white/40" />
-                                </button>
-                                <button onClick={() => { setMoveFile(selectedFileObj); setMoveDestination(currentPath); }} className="w-full py-2.5 rounded-xl border border-white/10 hover:bg-white/5 transition-colors flex items-center justify-center gap-2 text-sm font-medium">
-                                  Move <ArrowUpRight size={16} className="text-white/40" />
-                                </button>
-                              </>
-                            );
-                          })()}
-                          <button onClick={handleDownloadSelected} className="w-full py-2.5 rounded-xl border border-white/10 hover:bg-white/5 transition-colors flex items-center justify-center gap-2 text-sm font-medium">
-                            Download <Download size={16} className="text-white/40" />
-                          </button>
-                          {showDeleteConfirm ? (
-                            <div className="w-full p-3 rounded-xl border border-red-500/30 bg-red-500/10 flex flex-col gap-2">
-                              <p className="text-sm text-red-200 text-center">Delete {selectedFiles.size} item(s)?</p>
-                              <div className="flex gap-2">
-                                <button onClick={handleDeleteSelected} className="flex-1 py-1.5 bg-red-600 hover:bg-red-500 text-white rounded-lg text-sm font-medium transition-colors">Yes</button>
-                                <button onClick={() => setShowDeleteConfirm(false)} className="flex-1 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-lg text-sm font-medium transition-colors">No</button>
-                              </div>
+                    {/* Right Sidebar - Mobile Bottom Sheet */}
+                    <AnimatePresence>
+                      {selectedFiles.size > 0 && (
+                        <>
+                          <motion.div
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            onClick={() => setSelectedFiles(new Set())}
+                            className="fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm md:hidden"
+                          />
+                          <motion.div
+                            initial={{ y: '100%' }}
+                            animate={{ y: 0 }}
+                            exit={{ y: '100%' }}
+                            transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+                            className="fixed bottom-0 left-0 right-0 z-[90] bg-[#1a1a1a] border-t border-white/10 rounded-t-[32px] shadow-2xl md:hidden flex flex-col max-h-[70vh]"
+                          >
+                            <div className="w-12 h-1.5 bg-white/10 rounded-full mx-auto my-3 shrink-0" />
+                            <div className="px-6 pb-6 flex-1 overflow-y-auto">
+                              {renderFileInfoContent()}
                             </div>
-                          ) : (
-                            <button onClick={() => setShowDeleteConfirm(true)} className="w-full py-2.5 rounded-xl border border-red-500/20 text-red-400 hover:bg-red-500/10 transition-colors flex items-center justify-center gap-2 text-sm font-medium">
-                              Delete <X size={16} className="text-red-400/60" />
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    )}
+                            <div className="pb-8">
+                              {renderFileInfoActions()}
+                            </div>
+                          </motion.div>
+                        </>
+                      )}
+                    </AnimatePresence>
                   </div>
 
                 ) : (

@@ -24,13 +24,26 @@ const setupDirectories = async () => {
     '/home/Downloads',
     '/mnt'
   ];
+  
+  console.log("Setting up system directories...");
+  
   for (const dir of dirs) {
     try {
       if (!fsSync.existsSync(dir)) {
         await fs.mkdir(dir, { recursive: true });
+        console.log(`Created directory: ${dir}`);
       }
-    } catch (e) {
-      console.error(`Failed to create directory ${dir}:`, e);
+      // Try to ensure it's writable
+      try {
+        await fs.chmod(dir, 0o777);
+      } catch (chmodErr) {
+        // Ignore chmod errors
+      }
+    } catch (e: any) {
+      console.warn(`Note: Could not manage directory ${dir} (${e.message}). This is normal in restricted environments.`);
+      
+      // Fallback: if we can't use /home, the app will naturally fallback to os.homedir() 
+      // which is handled in the API routes.
     }
   }
 };
@@ -50,43 +63,63 @@ const storage = multer.diskStorage({
     cb(null, 'wallpaper-' + Date.now() + path.extname(file.originalname));
   }
 });
-const upload = multer({ storage });
+const upload = multer({ 
+  storage,
+  limits: { fileSize: 10 * 1024 * 1024 } // 10MB for wallpapers
+});
 
 // Setup multer for generic file uploads in file explorer
 const fileExplorerStorage = multer.diskStorage({
   destination: (req, file, cb) => {
     const targetPath = req.headers['x-target-dir'] as string || os.homedir();
+    console.log(`[STORAGE] Determining destination for ${file.originalname}. Target: ${targetPath}`);
     
     if (targetPath.startsWith('/mnt')) {
+      console.error(`[STORAGE] Permission denied for /mnt: ${targetPath}`);
       cb(new Error(`Permission denied: Cannot upload to ${targetPath}`), targetPath);
       return;
     }
 
     try {
+      // Ensure directory exists
+      if (!fsSync.existsSync(targetPath)) {
+        console.log(`[STORAGE] Creating directory: ${targetPath}`);
+        fsSync.mkdirSync(targetPath, { recursive: true });
+      }
+      
+      // Check write permissions
       fsSync.accessSync(targetPath, fsSync.constants.W_OK);
+      console.log(`[STORAGE] Destination verified: ${targetPath}`);
       cb(null, targetPath);
-    } catch (err) {
-      cb(new Error(`Permission denied: Cannot write to ${targetPath}`), targetPath);
+    } catch (err: any) {
+      console.error(`[STORAGE] Error for ${targetPath}:`, err);
+      cb(new Error(`Permission denied or directory not found: ${err.message}`), targetPath);
     }
   },
   filename: (req, file, cb) => {
+    console.log(`[STORAGE] Saving file as: ${file.originalname}`);
     cb(null, file.originalname);
   }
 });
-const uploadFileExplorer = multer({ storage: fileExplorerStorage });
+const uploadFileExplorer = multer({ 
+  storage: fileExplorerStorage,
+  limits: {
+    fileSize: 1024 * 1024 * 1024 * 2, // 2GB
+    fieldSize: 1024 * 1024 * 1024 * 2,
+    files: 20 // Max 20 files at once
+  },
+  fileFilter: (req, file, cb) => {
+    console.log(`[FILTER] Processing upload: ${file.originalname} (${file.mimetype})`);
+    cb(null, true);
+  }
+});
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json({ limit: '500mb' }));
-  app.use(express.urlencoded({ limit: '500mb', extended: true }));
   app.use(cookieParser());
   
-  // Serve public files statically
-  app.use(express.static(path.join(process.cwd(), 'public')));
-  app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
-
   // Authentication Middleware
   const requireAuth = (req: express.Request, res: express.Response, next: express.NextFunction) => {
     let token = req.cookies.auth_token;
@@ -109,6 +142,40 @@ async function startServer() {
       res.status(401).json({ error: "Invalid token" });
     }
   };
+
+  // 1. Upload Files API - MOVE TO TOP to avoid body-parser interference
+  app.post("/api/files/upload", requireAuth, (req, res) => {
+    const targetDir = req.headers['x-target-dir'] || 'default home';
+    console.log(`[UPLOAD] Request received. Target: ${targetDir}`);
+    
+    uploadFileExplorer.array('files')(req, res, (err) => {
+      if (err) {
+        console.error("[UPLOAD] Multer error:", err);
+        if (err instanceof multer.MulterError) {
+          let message = `Upload error: ${err.message}`;
+          if (err.code === 'LIMIT_FILE_SIZE') message = "File is too large (Max 1GB)";
+          return res.status(400).json({ error: message });
+        }
+        return res.status(400).json({ error: err.message || "File upload failed" });
+      }
+      
+      if (!req.files || (req.files as Express.Multer.File[]).length === 0) {
+        console.warn("[UPLOAD] No files in request");
+        return res.status(400).json({ error: "No files were uploaded" });
+      }
+      
+      const fileNames = (req.files as Express.Multer.File[]).map(f => f.originalname).join(', ');
+      console.log(`[UPLOAD] Success: ${fileNames}`);
+      res.json({ success: true, message: "Files uploaded successfully" });
+    });
+  });
+
+  app.use(express.json({ limit: '2048mb' }));
+  app.use(express.urlencoded({ limit: '2048mb', extended: true }));
+  
+  // Serve public files statically
+  app.use(express.static(path.join(process.cwd(), 'public')));
+  app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
   // Auth Routes
   app.post("/api/login", (req, res) => {
@@ -418,17 +485,6 @@ async function startServer() {
     }
   });
 
-  // Upload Files API
-  app.post("/api/files/upload", requireAuth, (req, res) => {
-    uploadFileExplorer.array('files')(req, res, (err) => {
-      if (err) {
-        console.error("Upload error:", err);
-        return res.status(400).json({ error: err.message || "File upload failed" });
-      }
-      res.json({ success: true, message: "Files uploaded successfully" });
-    });
-  });
-
   // Create Directory API
   app.post("/api/files/mkdir", requireAuth, async (req, res) => {
     const { targetPath, name } = req.body;
@@ -483,6 +539,19 @@ async function startServer() {
       }
       res.json({ url: `/uploads/${req.file.filename}` });
     });
+  });
+
+  // Global Error Handler for Payload Too Large and other errors
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (err.type === 'entity.too.large' || err.code === 'LIMIT_FILE_SIZE' || err.status === 413) {
+      console.error("[GLOBAL ERROR] Payload too large:", err);
+      return res.status(413).json({ 
+        error: "The file you are trying to upload is too large for the current configuration.",
+        details: "The server or proxy rejected the request size."
+      });
+    }
+    console.error("[GLOBAL ERROR]:", err);
+    res.status(500).json({ error: "Internal server error", details: err.message });
   });
 
   // Vite middleware for development
