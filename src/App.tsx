@@ -99,6 +99,14 @@ interface UploadTask {
   error?: string;
 }
 
+interface DownloadTask {
+  id: string;
+  fileName: string;
+  progress: number;
+  status: 'downloading' | 'completed' | 'error';
+  error?: string;
+}
+
 // Path helpers for frontend
 const path = {
   dirname: (p: string) => p.split('/').slice(0, -1).join('/') || '/',
@@ -180,6 +188,8 @@ export default function App() {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [uploadTasks, setUploadTasks] = useState<UploadTask[]>([]);
   const [showUploadComplete, setShowUploadComplete] = useState(false);
+  const [downloadTasks, setDownloadTasks] = useState<DownloadTask[]>([]);
+  const [showDownloadComplete, setShowDownloadComplete] = useState(false);
   const [editingPermissionsFile, setEditingPermissionsFile] = useState<FileItem | null>(null);
   const [newPermissions, setNewPermissions] = useState('');
   const [fileError, setFileError] = useState<string | null>(null);
@@ -423,25 +433,67 @@ export default function App() {
 
   const handleDownload = async (filePath: string) => {
     setFileError(null);
+    const taskId = Math.random().toString(36).substring(7);
+    const fileName = path.basename(filePath);
+    
+    setDownloadTasks(prev => [...prev, {
+      id: taskId,
+      fileName,
+      progress: 0,
+      status: 'downloading'
+    }]);
+
     try {
-      const response = await fetch(`/api/files/download?path=${encodeURIComponent(filePath)}`, {
-        headers: getAuthHeaders()
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('GET', `/api/files/download?path=${encodeURIComponent(filePath)}`);
+        xhr.responseType = 'blob';
+        
+        const headers = getAuthHeaders();
+        Object.keys(headers).forEach(key => {
+          xhr.setRequestHeader(key, headers[key as keyof typeof headers]);
+        });
+
+        xhr.onprogress = (event) => {
+          if (event.lengthComputable) {
+            const progress = Math.round((event.loaded * 100) / event.total);
+            setDownloadTasks(prev => prev.map(t => 
+              t.id === taskId ? { ...t, progress } : t
+            ));
+          }
+        };
+
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            const blob = xhr.response;
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = fileName;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+            
+            setDownloadTasks(prev => prev.map(t => 
+              t.id === taskId ? { ...t, status: 'completed', progress: 100 } : t
+            ));
+            resolve();
+          } else {
+            reject(new Error(`Failed to download: ${xhr.statusText}`));
+          }
+        };
+
+        xhr.onerror = () => reject(new Error('Network error during download'));
+        xhr.send();
       });
       
-      if (!response.ok) {
-        throw new Error(`Failed to download: ${response.statusText}`);
-      }
-      
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = path.basename(filePath);
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      window.URL.revokeObjectURL(url);
+      setShowDownloadComplete(true);
+      setTimeout(() => setShowDownloadComplete(false), 3000);
     } catch (error: any) {
+      setDownloadTasks(prev => prev.map(t => 
+        t.id === taskId ? { ...t, status: 'error', error: error.message } : t
+      ));
       setFileError(error.message || "Failed to download file");
     }
   };
@@ -452,37 +504,13 @@ export default function App() {
     
     const filePaths = Array.from(selectedFiles).map((name: string) => path.join(currentPath, name));
     
-    try {
-      for (const filePath of filePaths) {
-        const response = await fetch(`/api/files/download?path=${encodeURIComponent(filePath)}`, {
-          headers: getAuthHeaders()
-        });
-        
-        if (!response.ok) {
-          throw new Error(`Failed to download: ${response.statusText}`);
-        }
-        
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = path.basename(filePath);
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        window.URL.revokeObjectURL(url);
-        
-        // Small delay to prevent browser from blocking multiple downloads
-        await new Promise(resolve => setTimeout(resolve, 500));
-      }
-      
-      // Reset selection
-      setSelectedFiles(new Set());
-      setIsSelectMode(false);
-    } catch (error: any) {
-      console.error("Error downloading files:", error);
-      setFileError(error.message || "Network error while downloading files.");
+    for (const filePath of filePaths) {
+      await handleDownload(filePath);
+      await new Promise(resolve => setTimeout(resolve, 500));
     }
+    
+    setSelectedFiles(new Set());
+    setIsSelectMode(false);
   };
 
   const handleDeleteSelected = async () => {
@@ -1855,6 +1883,61 @@ export default function App() {
                                       {task.status === 'uploading' && <span className="text-[10px] text-white/40">{task.progress}%</span>}
                                     </div>
                                     {task.status === 'uploading' && (
+                                      <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden">
+                                        <motion.div 
+                                          initial={{ width: 0 }}
+                                          animate={{ width: `${task.progress}%` }}
+                                          className="h-full bg-blue-500"
+                                        />
+                                      </div>
+                                    )}
+                                    {task.status === 'error' && (
+                                      <p className="text-[10px] text-red-400 truncate">{task.error}</p>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+
+                        {/* Download Progress Toast */}
+                        <AnimatePresence>
+                          {(downloadTasks.length > 0 || showDownloadComplete) && (
+                            <motion.div 
+                              initial={{ opacity: 0, y: 20 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              exit={{ opacity: 0, y: 20 }}
+                              className="fixed bottom-6 left-6 z-[100] w-80 bg-[#1a1a1a] border border-white/10 rounded-2xl shadow-2xl overflow-hidden"
+                            >
+                              <div className="p-4 border-b border-white/10 flex items-center justify-between bg-white/5">
+                                <h4 className="text-sm font-semibold flex items-center gap-2">
+                                  {showDownloadComplete ? (
+                                    <><CheckCircle2 size={16} className="text-green-500" /> Download Complete</>
+                                  ) : (
+                                    <><Download size={16} className="text-blue-500 animate-bounce" /> Downloading Files...</>
+                                  )}
+                                </h4>
+                                <button 
+                                  onClick={() => {
+                                    setDownloadTasks([]);
+                                    setShowDownloadComplete(false);
+                                  }}
+                                  className="text-white/40 hover:text-white transition-colors"
+                                >
+                                  <X size={16} />
+                                </button>
+                              </div>
+                              <div className="max-h-60 overflow-y-auto p-2 space-y-1">
+                                {downloadTasks.map(task => (
+                                  <div key={task.id} className="p-2 rounded-lg bg-white/5 border border-white/5">
+                                    <div className="flex items-center justify-between mb-1.5">
+                                      <span className="text-xs font-medium truncate flex-1 pr-2">{task.fileName}</span>
+                                      {task.status === 'completed' && <CheckCircle2 size={14} className="text-green-500 shrink-0" />}
+                                      {task.status === 'error' && <AlertCircle size={14} className="text-red-500 shrink-0" />}
+                                      {task.status === 'downloading' && <span className="text-[10px] text-white/40">{task.progress}%</span>}
+                                    </div>
+                                    {task.status === 'downloading' && (
                                       <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden">
                                         <motion.div 
                                           initial={{ width: 0 }}
