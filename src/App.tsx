@@ -673,7 +673,7 @@ export default function App() {
               errorMsg = response.error || errorMsg;
             } catch (e) {
               if (xhr.status === 413) {
-                errorMsg = "File is too large for the server to process (Max 2GB). The request was likely rejected by a proxy or firewall.";
+                errorMsg = "File is too large for the server to process (Max 5GB). The request was likely rejected by a proxy or firewall.";
               } else if (xhr.responseText) {
                 errorMsg = xhr.responseText.length > 100 
                   ? xhr.responseText.substring(0, 100) + '...' 
@@ -1020,10 +1020,10 @@ export default function App() {
         <h3 className="text-xs font-semibold text-white/40 mb-3 tracking-wider uppercase">Quick Access</h3>
         <div className="space-y-1">
           {[
-            { path: '/home', icon: <Home size={18} />, label: 'Home' },
-            { path: '/home/Documents', icon: <FileText size={18} />, label: 'Documents' },
-            { path: '/home/Images', icon: <ImageIcon size={18} />, label: 'Images' },
-            { path: '/home/Downloads', icon: <Download size={18} />, label: 'Downloads' },
+            { path: 'HOME', icon: <Home size={18} />, label: 'Home' },
+            { path: 'Documents', icon: <FileText size={18} />, label: 'Documents' },
+            { path: 'Images', icon: <ImageIcon size={18} />, label: 'Images' },
+            { path: 'Downloads', icon: <Download size={18} />, label: 'Downloads' },
           ].map((item) => (
             <button 
               key={item.path}

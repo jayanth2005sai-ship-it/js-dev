@@ -17,15 +17,15 @@ import { WebSocketServer } from "ws";
 
 // Create necessary directories for the file explorer to look like a real OS
 const setupDirectories = async () => {
+  const home = os.homedir();
   const dirs = [
-    '/home',
-    '/home/Documents',
-    '/home/Images',
-    '/home/Downloads',
+    path.join(home, 'Documents'),
+    path.join(home, 'Images'),
+    path.join(home, 'Downloads'),
     '/mnt'
   ];
   
-  console.log("Setting up system directories...");
+  console.log(`Setting up system directories in ${home}...`);
   
   for (const dir of dirs) {
     try {
@@ -42,7 +42,7 @@ const setupDirectories = async () => {
         // Ignore chmod errors
       }
     } catch (e: any) {
-      console.warn(`Note: Could not manage directory ${dir} (${e.message}). This is normal in restricted environments.`);
+      console.warn(`Note: Could not manage directory ${dir} (${e.message}).`);
     }
   }
 };
@@ -102,8 +102,8 @@ const fileExplorerStorage = multer.diskStorage({
 const uploadFileExplorer = multer({ 
   storage: fileExplorerStorage,
   limits: {
-    fileSize: 1024 * 1024 * 1024 * 2, // 2GB
-    fieldSize: 1024 * 1024 * 1024 * 2,
+    fileSize: 5 * 1024 * 1024 * 1024, // 5GB
+    fieldSize: 5 * 1024 * 1024 * 1024,
     files: 20 // Max 20 files at once
   },
   fileFilter: (req, file, cb) => {
@@ -158,7 +158,7 @@ async function startServer() {
         console.error("[UPLOAD] Multer error:", err);
         if (err instanceof multer.MulterError) {
           let message = `Upload error: ${err.message}`;
-          if (err.code === 'LIMIT_FILE_SIZE') message = "File is too large (Max 1GB)";
+          if (err.code === 'LIMIT_FILE_SIZE') message = "File is too large (Max 5GB)";
           return res.status(400).json({ error: message });
         }
         return res.status(400).json({ error: err.message || "File upload failed" });
@@ -175,8 +175,8 @@ async function startServer() {
     });
   });
 
-  app.use(express.json({ limit: '2048mb' }));
-  app.use(express.urlencoded({ limit: '2048mb', extended: true }));
+  app.use(express.json({ limit: '5120mb' }));
+  app.use(express.urlencoded({ limit: '5120mb', extended: true }));
   
   // Serve public files statically
   app.use(express.static(path.join(process.cwd(), 'public')));
@@ -321,7 +321,12 @@ async function startServer() {
 
   // File Explorer API
   app.get("/api/files", requireAuth, async (req, res) => {
-    const targetPath = (req.query.path as string) || os.homedir();
+    let targetPath = (req.query.path as string) || os.homedir();
+    
+    // Handle special tokens
+    if (targetPath === 'HOME') targetPath = os.homedir();
+    else if (['Documents', 'Images', 'Downloads'].includes(targetPath)) targetPath = path.join(os.homedir(), targetPath);
+    
     try {
       // Ensure directory exists
       if (!fsSync.existsSync(targetPath)) {
