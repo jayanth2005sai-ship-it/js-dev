@@ -56,7 +56,8 @@ import {
   Menu,
   Eye,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  CheckSquare
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Fuse, { FuseResultMatch } from 'fuse.js';
@@ -167,6 +168,7 @@ export default function App() {
   const [currentPath, setCurrentPath] = useState('');
   const [files, setFiles] = useState<FileItem[]>([]);
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
+  const [lastSelectedFile, setLastSelectedFile] = useState<string | null>(null);
   const [showInfoPanel, setShowInfoPanel] = useState(false);
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [hiddenAppIds, setHiddenAppIds] = useState<Set<string>>(() => {
@@ -1817,6 +1819,20 @@ export default function App() {
                             )}
                           </motion.div>
                           <div className="flex items-center gap-1 border-l border-white/10 pl-3">
+                            <button 
+                              onClick={() => {
+                                if (selectedFiles.size === files.length && files.length > 0) {
+                                  setSelectedFiles(new Set());
+                                } else {
+                                  setSelectedFiles(new Set(files.map(f => f.name)));
+                                  setShowInfoPanel(true);
+                                }
+                              }} 
+                              className={`p-1.5 rounded-md transition-colors ${selectedFiles.size === files.length && files.length > 0 ? 'text-blue-400 bg-blue-400/10' : 'text-white/60 hover:text-white hover:bg-white/10'}`}
+                              title={selectedFiles.size === files.length && files.length > 0 ? "Deselect All" : "Select All"}
+                            >
+                              <CheckSquare size={16} />
+                            </button>
                             <button onClick={() => setIsCreatingFolder(true)} className="p-1.5 text-white/60 hover:text-white hover:bg-white/10 rounded-md transition-colors" title="New Folder">
                               <FolderPlus size={16} />
                             </button>
@@ -1982,6 +1998,28 @@ export default function App() {
                                 }}
                                 onClick={(e) => {
                                   e.stopPropagation();
+                                  
+                                  const visibleFiles = files.filter(f => f.name.toLowerCase().includes(fileSearchQuery.toLowerCase()));
+                                  
+                                  if (e.shiftKey && lastSelectedFile) {
+                                    const currentIndex = visibleFiles.findIndex(f => f.name === file.name);
+                                    const lastIndex = visibleFiles.findIndex(f => f.name === lastSelectedFile);
+                                    
+                                    if (currentIndex !== -1 && lastIndex !== -1) {
+                                      const start = Math.min(currentIndex, lastIndex);
+                                      const end = Math.max(currentIndex, lastIndex);
+                                      
+                                      const newSelected = new Set(selectedFiles);
+                                      for (let i = start; i <= end; i++) {
+                                        newSelected.add(visibleFiles[i].name);
+                                      }
+                                      setSelectedFiles(newSelected);
+                                      setLastSelectedFile(file.name);
+                                      setShowInfoPanel(true);
+                                      return;
+                                    }
+                                  }
+
                                   // If Ctrl or Meta key is pressed, toggle selection instead of opening
                                   if (e.ctrlKey || e.metaKey) {
                                     const newSelected = new Set(selectedFiles);
@@ -1991,6 +2029,8 @@ export default function App() {
                                       newSelected.add(file.name);
                                     }
                                     setSelectedFiles(newSelected);
+                                    setLastSelectedFile(file.name);
+                                    if (newSelected.size > 0) setShowInfoPanel(true);
                                     return;
                                   }
 
@@ -1999,6 +2039,7 @@ export default function App() {
                                   } else {
                                     const newSelected = new Set([file.name]);
                                     setSelectedFiles(newSelected);
+                                    setLastSelectedFile(file.name);
                                     setPreviewFile(file);
                                   }
                                   setShowInfoPanel(false);
