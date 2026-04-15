@@ -1021,7 +1021,7 @@ export default function App() {
     return (
       <div className="min-h-screen bg-[#0a0a0a] text-white font-sans selection:bg-blue-500/30 overflow-hidden relative flex items-center justify-center">
         <div 
-          className="absolute inset-0 bg-cover bg-center bg-no-repeat opacity-40 scale-105 blur-sm"
+          className={`absolute inset-0 bg-cover bg-center bg-no-repeat opacity-40 scale-105 ${wallpaperUrl === DEFAULT_WALLPAPER ? 'blur-sm' : ''}`}
           style={{ backgroundImage: `url(${wallpaperUrl})` }}
         />
         <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/60" />
@@ -1316,7 +1316,7 @@ export default function App() {
     <div className="min-h-screen bg-[#0a0a0a] text-white font-sans selection:bg-blue-500/30 overflow-hidden relative">
       {/* Background Wallpaper with Overlay */}
       <div 
-        className="absolute inset-0 bg-cover bg-center bg-no-repeat opacity-40 scale-105 blur-sm"
+        className={`absolute inset-0 bg-cover bg-center bg-no-repeat opacity-40 scale-105 ${wallpaperUrl === DEFAULT_WALLPAPER ? 'blur-sm' : ''}`}
         style={{ backgroundImage: `url(${wallpaperUrl})` }}
       />
       <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/60" />
