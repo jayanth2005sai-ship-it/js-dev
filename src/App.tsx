@@ -61,6 +61,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Fuse, { FuseResultMatch } from 'fuse.js';
+import { Toaster, toast } from 'sonner';
 
 // Types
 interface AppIcon {
@@ -106,6 +107,16 @@ interface DownloadTask {
   progress: number;
   status: 'downloading' | 'completed' | 'error';
   error?: string;
+}
+
+
+interface AppNotification {
+  id: string;
+  title: string;
+  message?: string;
+  type: 'success' | 'error' | 'info';
+  timestamp: Date;
+  read: boolean;
 }
 
 // Path helpers for frontend
@@ -194,12 +205,34 @@ export default function App() {
   const [showDownloadComplete, setShowDownloadComplete] = useState(false);
   const [editingPermissionsFile, setEditingPermissionsFile] = useState<FileItem | null>(null);
   const [newPermissions, setNewPermissions] = useState('');
-  const [fileError, setFileError] = useState<string | null>(null);
   const [previewFile, setPreviewFile] = useState<FileItem | null>(null);
   const [previewContent, setPreviewContent] = useState<string | null>(null);
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
   const [imageRotation, setImageRotation] = useState(0);
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
+
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const notificationsRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (notificationsRef.current && !notificationsRef.current.contains(event.target as Node)) {
+        setShowNotifications(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const notify = (title: string, type: 'success' | 'error' | 'info' = 'info', message?: string) => {
+    const id = Math.random().toString(36).substr(2, 9);
+    setNotifications(prev => [{ id, title, message, type, timestamp: new Date(), read: false }, ...prev]);
+    if (type === 'success') toast.success(title, { description: message });
+    else if (type === 'error') toast.error(title, { description: message });
+    else toast(title, { description: message });
+  };
+
 
   useEffect(() => {
     setImageRotation(0);
@@ -411,7 +444,6 @@ export default function App() {
   };
 
   const fetchFiles = async (path: string = '') => {
-    setFileError(null);
     try {
       const response = await fetch(`/api/files?path=${encodeURIComponent(path)}`, { 
         credentials: 'include',
@@ -425,16 +457,15 @@ export default function App() {
         setPreviewFile(null); // Clear preview on navigate
       } else {
         const errorData = await response.json().catch(() => ({}));
-        setFileError(errorData.error + (errorData.details ? `: ${errorData.details}` : "") || "Failed to fetch files. Permission denied or path does not exist.");
+        notify(errorData.error + (errorData.details ? `: ${errorData.details}` : "") || "Failed to fetch files. Permission denied or path does not exist.", "error");
       }
     } catch (error: any) {
       console.error("Failed to fetch files:", error);
-      setFileError(error.message || "Network error while fetching files.");
+      notify(error.message || "Network error while fetching files.", "error");
     }
   };
 
   const handleDownload = async (filePath: string) => {
-    setFileError(null);
     const taskId = Math.random().toString(36).substring(7);
     const fileName = path.basename(filePath);
     
@@ -496,13 +527,12 @@ export default function App() {
       setDownloadTasks(prev => prev.map(t => 
         t.id === taskId ? { ...t, status: 'error', error: error.message } : t
       ));
-      setFileError(error.message || "Failed to download file");
+      notify(error.message || "Failed to download file", "error");
     }
   };
 
   const handleDownloadSelected = async () => {
     if (selectedFiles.size === 0) return;
-    setFileError(null);
     
     const filePaths = Array.from(selectedFiles).map((name: string) => path.join(currentPath, name));
     
@@ -517,8 +547,6 @@ export default function App() {
 
   const handleDeleteSelected = async () => {
     if (selectedFiles.size === 0) return;
-    
-    setFileError(null);
     setShowDeleteConfirm(false);
     
     const filePaths = Array.from(selectedFiles).map((name: string) => path.join(currentPath, name));
@@ -539,13 +567,14 @@ export default function App() {
         setSelectedFiles(new Set());
         setIsSelectMode(false);
         fetchFiles(currentPath);
+        notify("Operation successful", "success");
       } else {
         const errorData = await response.json().catch(() => ({}));
-        setFileError(errorData.error || "Failed to delete selected files.");
+        notify(errorData.error || "Failed to delete selected files.", "error");
       }
     } catch (error: any) {
       console.error("Error deleting files:", error);
-      setFileError(error.message || "Network error while deleting files.");
+      notify(error.message || "Network error while deleting files.", "error");
     }
   };
 
@@ -573,12 +602,13 @@ export default function App() {
         setIsCreatingFolder(false);
         setNewFolderName('');
         fetchFiles(currentPath);
+        notify("Operation successful", "success");
       } else {
         const data = await response.json().catch(() => ({}));
-        setFileError(data.error || "Failed to create folder");
+        notify(data.error || "Failed to create folder", "error");
       }
     } catch (error: any) {
-      setFileError(error.message || "Failed to create folder");
+      notify(error.message || "Failed to create folder", "error");
     }
   };
 
@@ -600,12 +630,13 @@ export default function App() {
         setRenameFile(null);
         setNewFileName('');
         fetchFiles(currentPath);
+        notify("Operation successful", "success");
       } else {
         const data = await response.json().catch(() => ({}));
-        setFileError(data.error || "Failed to rename file");
+        notify(data.error || "Failed to rename file", "error");
       }
     } catch (error: any) {
-      setFileError(error.message || "Failed to rename file");
+      notify(error.message || "Failed to rename file", "error");
     }
   };
 
@@ -627,12 +658,13 @@ export default function App() {
         setMoveFile(null);
         setMoveDestination('');
         fetchFiles(currentPath);
+        notify("Operation successful", "success");
       } else {
         const data = await response.json().catch(() => ({}));
-        setFileError(data.error || "Failed to move file");
+        notify(data.error || "Failed to move file", "error");
       }
     } catch (error: any) {
-      setFileError(error.message || "Failed to move file");
+      notify(error.message || "Failed to move file", "error");
     }
   };
 
@@ -651,18 +683,18 @@ export default function App() {
       });
       if (response.ok) {
         fetchFiles(currentPath);
+        notify("Operation successful", "success");
       } else {
         const data = await response.json().catch(() => ({}));
-        setFileError(data.error || "Failed to move file");
+        notify(data.error || "Failed to move file", "error");
       }
     } catch (error: any) {
-      setFileError(error.message || "Failed to move file");
+      notify(error.message || "Failed to move file", "error");
     }
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0) return;
-    setFileError(null);
     setShowUploadComplete(false);
     
     const filesToUpload = Array.from(e.target.files);
@@ -746,15 +778,16 @@ export default function App() {
       const failed = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
       if (failed.length === 0) {
         setShowUploadComplete(true);
+        notify("Files uploaded successfully", "success");
         setTimeout(() => setShowUploadComplete(false), 5000);
       } else {
         const firstError = failed[0].reason?.message || "Unknown upload error";
         console.error(`${failed.length} uploads failed. First error: ${firstError}`);
-        setFileError(`${failed.length} file(s) failed to upload: ${firstError}`);
+        notify(`${failed.length} file(s, "error") failed to upload: ${firstError}`);
       }
     } catch (error) {
       console.error("Unexpected error during upload process:", error);
-      setFileError("An unexpected error occurred during upload.");
+      notify("An unexpected error occurred during upload.", "error");
     }
     
     // Clear input
@@ -763,7 +796,6 @@ export default function App() {
 
   const handleCreateDirectory = async () => {
     if (!newFolderName.trim()) return;
-    setFileError(null);
     try {
       const response = await fetch('/api/files/mkdir', {
         method: 'POST',
@@ -781,19 +813,19 @@ export default function App() {
         setIsCreatingFolder(false);
         setNewFolderName('');
         fetchFiles(currentPath);
+        notify("Operation successful", "success");
       } else {
         const errorData = await response.json().catch(() => ({}));
-        setFileError(errorData.error || "Failed to create directory.");
+        notify(errorData.error || "Failed to create directory.", "error");
       }
     } catch (error: any) {
       console.error("Error creating directory:", error);
-      setFileError(error.message || "Network error while creating directory.");
+      notify(error.message || "Network error while creating directory.", "error");
     }
   };
 
   const handlePermissionsChange = async () => {
     if (!editingPermissionsFile) return;
-    setFileError(null);
     try {
       const response = await fetch('/api/files/permissions', {
         method: 'POST',
@@ -810,13 +842,14 @@ export default function App() {
       if (response.ok) {
         setEditingPermissionsFile(null);
         fetchFiles(currentPath);
+        notify("Operation successful", "success");
       } else {
         const errorData = await response.json().catch(() => ({}));
-        setFileError(errorData.error || "Failed to change permissions.");
+        notify(errorData.error || "Failed to change permissions.", "error");
       }
     } catch (error: any) {
       console.error("Error changing permissions:", error);
-      setFileError(error.message || "Network error while changing permissions.");
+      notify(error.message || "Network error while changing permissions.", "error");
     }
   };
 
@@ -1080,12 +1113,13 @@ export default function App() {
                     });
                     if (response.ok) {
                       fetchFiles(currentPath);
-                    } else {
+        notify("Operation successful", "success");
+      } else {
                       const data = await response.json().catch(() => ({}));
-                      setFileError(data.error || "Failed to move file");
+                      notify(data.error || "Failed to move file", "error");
                     }
                   } catch (error: any) {
-                    setFileError(error.message || "Failed to move file");
+                    notify(error.message || "Failed to move file", "error");
                   }
                 }
               }}
@@ -1128,12 +1162,13 @@ export default function App() {
                     });
                     if (response.ok) {
                       fetchFiles(currentPath);
-                    } else {
+        notify("Operation successful", "success");
+      } else {
                       const data = await response.json().catch(() => ({}));
-                      setFileError(data.error || "Failed to move file");
+                      notify(data.error || "Failed to move file", "error");
                     }
                   } catch (error: any) {
-                    setFileError(error.message || "Failed to move file");
+                    notify(error.message || "Failed to move file", "error");
                   }
                 }
               }}
@@ -1287,7 +1322,7 @@ export default function App() {
       <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/60" />
 
       {/* Top Navigation Bar */}
-      <nav className="relative z-10 flex items-center justify-between px-4 md:px-8 py-4 backdrop-blur-md bg-black/10 border-b border-white/5">
+      <nav className="relative z-50 flex items-center justify-between px-4 md:px-8 py-4 backdrop-blur-md bg-black/10 border-b border-white/5">
         <div className="flex items-center gap-4 md:gap-6">
           <div className="flex items-center gap-2 font-bold text-xl tracking-tight">
             <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center shadow-lg shadow-blue-500/20">
@@ -1306,9 +1341,81 @@ export default function App() {
           </div>
           
           <div className="flex items-center gap-3">
-            <button className="p-2 hover:bg-white/10 rounded-full transition-colors">
-              <Bell size={20} />
-            </button>
+            <div className="relative" ref={notificationsRef}>
+              <button 
+                onClick={() => {
+                  setShowNotifications(!showNotifications);
+                  if (!showNotifications) {
+                    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+                  }
+                }}
+                className="p-2 hover:bg-white/10 rounded-full transition-colors relative"
+              >
+                <Bell size={20} />
+                {notifications.some(n => !n.read) && (
+                  <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full" />
+                )}
+              </button>
+              
+              <AnimatePresence>
+                {showNotifications && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                    className="absolute right-0 mt-2 w-80 bg-[#1a1a1a] border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-50"
+                  >
+                    <div className="p-4 border-b border-white/10 flex items-center justify-between">
+                      <h3 className="font-semibold text-white">Notifications</h3>
+                      {notifications.length > 0 && (
+                        <button 
+                          onClick={() => setNotifications([])}
+                          className="text-xs text-white/40 hover:text-white transition-colors"
+                        >
+                          Clear all
+                        </button>
+                      )}
+                    </div>
+                    <div className="max-h-[400px] overflow-y-auto custom-scrollbar">
+                      {notifications.length === 0 ? (
+                        <div className="p-8 text-center text-white/40">
+                          <Bell size={24} className="mx-auto mb-2 opacity-20" />
+                          <p className="text-sm">No notifications</p>
+                        </div>
+                      ) : (
+                        <div className="flex flex-col">
+                          {notifications.map(notification => (
+                            <div 
+                              key={notification.id} 
+                              className={`p-4 border-b border-white/5 last:border-0 flex gap-3 ${!notification.read ? 'bg-white/5' : ''}`}
+                            >
+                              <div className="shrink-0 mt-0.5">
+                                {notification.type === 'success' ? (
+                                  <CheckCircle2 size={16} className="text-green-400" />
+                                ) : notification.type === 'error' ? (
+                                  <AlertCircle size={16} className="text-red-400" />
+                                ) : (
+                                  <Bell size={16} className="text-blue-400" />
+                                )}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium text-white truncate">{notification.title}</p>
+                                {notification.message && (
+                                  <p className="text-xs text-white/60 mt-1 line-clamp-2">{notification.message}</p>
+                                )}
+                                <p className="text-[10px] text-white/40 mt-2">
+                                  {notification.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                </p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
             <button onClick={handleLogout} className="p-2 hover:bg-white/10 rounded-full transition-colors text-red-400">
               <Power size={20} />
             </button>
@@ -1750,12 +1857,13 @@ export default function App() {
                                           });
                                           if (response.ok) {
                                             fetchFiles(currentPath);
-                                          } else {
+        notify("Operation successful", "success");
+      } else {
                                             const data = await response.json().catch(() => ({}));
-                                            setFileError(data.error || "Failed to move file");
+                                            notify(data.error || "Failed to move file", "error");
                                           }
                                         } catch (error: any) {
-                                          setFileError(error.message || "Failed to move file");
+                                          notify(error.message || "Failed to move file", "error");
                                         }
                                       }
                                     }}
@@ -1821,18 +1929,32 @@ export default function App() {
                           <div className="flex items-center gap-1 border-l border-white/10 pl-3">
                             <button 
                               onClick={() => {
-                                if (selectedFiles.size === files.length && files.length > 0) {
+                                setIsSelectMode(!isSelectMode);
+                                if (isSelectMode) {
                                   setSelectedFiles(new Set());
-                                } else {
-                                  setSelectedFiles(new Set(files.map(f => f.name)));
-                                  setShowInfoPanel(true);
                                 }
-                              }} 
-                              className={`p-1.5 rounded-md transition-colors ${selectedFiles.size === files.length && files.length > 0 ? 'text-blue-400 bg-blue-400/10' : 'text-white/60 hover:text-white hover:bg-white/10'}`}
-                              title={selectedFiles.size === files.length && files.length > 0 ? "Deselect All" : "Select All"}
+                              }}
+                              className={`p-1.5 rounded-md transition-colors ${isSelectMode ? 'text-blue-400 bg-blue-400/10' : 'text-white/60 hover:text-white hover:bg-white/10'}`}
+                              title="Toggle Select Mode"
                             >
                               <CheckSquare size={16} />
                             </button>
+                            {isSelectMode && (
+                              <button 
+                                onClick={() => {
+                                  if (selectedFiles.size === files.length && files.length > 0) {
+                                    setSelectedFiles(new Set());
+                                  } else {
+                                    setSelectedFiles(new Set(files.map(f => f.name)));
+                                    setShowInfoPanel(true);
+                                  }
+                                }} 
+                                className={`p-1.5 rounded-md transition-colors ${selectedFiles.size === files.length && files.length > 0 ? 'text-blue-400 bg-blue-400/10' : 'text-white/60 hover:text-white hover:bg-white/10'}`}
+                                title={selectedFiles.size === files.length && files.length > 0 ? "Deselect All" : "Select All"}
+                              >
+                                <CheckCircle2 size={16} />
+                              </button>
+                            )}
                             <button onClick={() => setIsCreatingFolder(true)} className="p-1.5 text-white/60 hover:text-white hover:bg-white/10 rounded-md transition-colors" title="New Folder">
                               <FolderPlus size={16} />
                             </button>
@@ -1855,12 +1977,6 @@ export default function App() {
                           setShowInfoPanel(false);
                         }}
                       >
-                        {fileError && (
-                          <div className="bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-3 mb-4 flex items-center justify-between text-red-400 text-sm">
-                            <span>{fileError}</span>
-                            <button onClick={() => setFileError(null)} className="hover:text-red-300 transition-colors"><X size={16} /></button>
-                          </div>
-                        )}
 
                         {/* Upload Tasks Overlay */}
                         <AnimatePresence>
@@ -2021,7 +2137,7 @@ export default function App() {
                                   }
 
                                   // If Ctrl or Meta key is pressed, toggle selection instead of opening
-                                  if (e.ctrlKey || e.metaKey) {
+                                  if (isSelectMode || e.ctrlKey || e.metaKey) {
                                     const newSelected = new Set(selectedFiles);
                                     if (newSelected.has(file.name)) {
                                       newSelected.delete(file.name);
@@ -2031,6 +2147,7 @@ export default function App() {
                                     setSelectedFiles(newSelected);
                                     setLastSelectedFile(file.name);
                                     if (newSelected.size > 0) setShowInfoPanel(true);
+                                    else setShowInfoPanel(false);
                                     return;
                                   }
 
@@ -2054,8 +2171,13 @@ export default function App() {
                                 onDoubleClick={(e) => {
                                   e.preventDefault();
                                 }}
-                                className={`flex flex-col items-center justify-center p-3 md:p-6 rounded-xl cursor-pointer transition-all border ${isSelected ? 'bg-blue-500/20 border-blue-500/50 shadow-[0_0_15px_rgba(59,130,246,0.15)]' : 'bg-transparent border-transparent hover:bg-white/5'}`}
+                                className={`group flex flex-col items-center justify-center p-3 md:p-6 rounded-xl cursor-pointer transition-all border relative ${isSelected ? 'bg-blue-500/20 border-blue-500/50 shadow-[0_0_15px_rgba(59,130,246,0.15)]' : 'bg-transparent border-transparent hover:bg-white/5'}`}
                               >
+                                {(isSelectMode || isSelected) && (
+                                  <div className="absolute top-2 left-2 text-blue-400">
+                                    {isSelected ? <CheckSquare size={18} /> : <div className="w-[18px] h-[18px] rounded-[4px] border-2 border-white/20 group-hover:border-white/40 transition-colors" />}
+                                  </div>
+                                )}
                                 <div className="mb-2 md:mb-3">
                                   {getFileIcon(file, window.innerWidth < 768 ? 40 : 48)}
                                 </div>
@@ -2354,6 +2476,7 @@ export default function App() {
           background: rgba(255, 255, 255, 0.2);
         }
       `}</style>
+      <Toaster theme="dark" position="bottom-right" />
     </div>
   );
 }
