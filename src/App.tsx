@@ -199,6 +199,7 @@ export default function App() {
   const [moveDestination, setMoveDestination] = useState('');
   const [isSearchExpanded, setIsSearchExpanded] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const longPressTriggered = useRef(false);
   const [uploadTasks, setUploadTasks] = useState<UploadTask[]>([]);
   const [showUploadComplete, setShowUploadComplete] = useState(false);
   const [downloadTasks, setDownloadTasks] = useState<DownloadTask[]>([]);
@@ -1363,7 +1364,7 @@ export default function App() {
                     initial={{ opacity: 0, y: 10, scale: 0.95 }}
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                    className="absolute right-0 mt-2 w-80 bg-[#1a1a1a] border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-50"
+                    className="fixed sm:absolute top-[72px] sm:top-auto right-4 sm:right-0 left-4 sm:left-auto mt-0 sm:mt-2 sm:w-80 bg-[#1a1a1a] border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-50"
                   >
                     <div className="p-4 border-b border-white/10 flex items-center justify-between">
                       <h3 className="font-semibold text-white">Notifications</h3>
@@ -1444,7 +1445,7 @@ export default function App() {
             {/* System Status Widgets */}
             <div className="space-y-4">
               <h2 className="text-xs font-bold uppercase tracking-widest text-white/40 px-1">System Status</h2>
-              <div className="grid grid-cols-1 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-4">
                 {/* CPU */}
                 <motion.div 
                   whileHover={{ scale: 1.02 }}
@@ -1971,7 +1972,7 @@ export default function App() {
                       
                       {/* File Grid */}
                       <div 
-                        className="flex-1 overflow-y-auto p-6 relative"
+                        className="flex-1 overflow-y-auto p-4 md:p-6 relative"
                         onClick={() => {
                           setSelectedFiles(new Set());
                           setShowInfoPanel(false);
@@ -2112,8 +2113,31 @@ export default function App() {
                                     }
                                   }
                                 }}
+
+                                onTouchStart={(e) => {
+                                  longPressTriggered.current = false;
+                                  const timer = setTimeout(() => {
+                                    longPressTriggered.current = true;
+                                    const newSelected = new Set([file.name]);
+                                    setSelectedFiles(newSelected);
+                                    setShowInfoPanel(true);
+                                    if (navigator.vibrate) navigator.vibrate(50);
+                                  }, 500);
+                                  (e.currentTarget as any).longPressTimer = timer;
+                                }}
+                                onTouchEnd={(e) => {
+                                  clearTimeout((e.currentTarget as any).longPressTimer);
+                                }}
+                                onTouchMove={(e) => {
+                                  clearTimeout((e.currentTarget as any).longPressTimer);
+                                }}
                                 onClick={(e) => {
                                   e.stopPropagation();
+                                  if (longPressTriggered.current) {
+                                    longPressTriggered.current = false;
+                                    return;
+                                  }
+
                                   
                                   const visibleFiles = files.filter(f => f.name.toLowerCase().includes(fileSearchQuery.toLowerCase()));
                                   
