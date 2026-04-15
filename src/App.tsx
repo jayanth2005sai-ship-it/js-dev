@@ -215,6 +215,9 @@ export default function App() {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
   const notificationsRef = useRef<HTMLDivElement>(null);
+  const activeUploads = useRef<Map<string, XMLHttpRequest>>(new Map());
+  const cancelledTasks = useRef<Set<string>>(new Set());
+  const activeDownloads = useRef<Map<string, AbortController>>(new Map());
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -466,10 +469,34 @@ export default function App() {
     }
   };
 
+  const getDownloadUrl = (filePath: string) => {
+    const token = localStorage.getItem('auth_token');
+    const baseUrl = `/api/files/download?path=${encodeURIComponent(filePath)}`;
+    return token ? `${baseUrl}&token=${token}` : baseUrl;
+  };
+
   const handleDownload = async (filePath: string) => {
-    const taskId = Math.random().toString(36).substring(7);
+    const fileItem = files.find(f => f.name === path.basename(filePath));
+    const fileSize = fileItem?.size || 0;
     const fileName = path.basename(filePath);
-    
+    const taskId = Math.random().toString(36).substring(7);
+
+    // For very large files on mobile, use native download to avoid memory issues
+    if (fileSize > 100 * 1024 * 1024) {
+      const url = getDownloadUrl(filePath);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      notify(`Large file download started: ${fileName}. Use browser download manager to manage.`, "info");
+      return;
+    }
+
+    const controller = new AbortController();
+    activeDownloads.current.set(taskId, controller);
+
     setDownloadTasks(prev => [...prev, {
       id: taskId,
       fileName,
@@ -478,58 +505,76 @@ export default function App() {
     }]);
 
     try {
-      await new Promise<void>((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open('GET', `/api/files/download?path=${encodeURIComponent(filePath)}`);
-        xhr.responseType = 'blob';
-        
-        const headers = getAuthHeaders();
-        Object.keys(headers).forEach(key => {
-          xhr.setRequestHeader(key, headers[key as keyof typeof headers]);
-        });
-
-        xhr.onprogress = (event) => {
-          if (event.lengthComputable) {
-            const progress = Math.round((event.loaded * 100) / event.total);
-            setDownloadTasks(prev => prev.map(t => 
-              t.id === taskId ? { ...t, progress } : t
-            ));
-          }
-        };
-
-        xhr.onload = () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            const blob = xhr.response;
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = fileName;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            window.URL.revokeObjectURL(url);
-            
-            setDownloadTasks(prev => prev.map(t => 
-              t.id === taskId ? { ...t, status: 'completed', progress: 100 } : t
-            ));
-            resolve();
-          } else {
-            reject(new Error(`Failed to download: ${xhr.statusText}`));
-          }
-        };
-
-        xhr.onerror = () => reject(new Error('Network error during download'));
-        xhr.send();
+      const url = getDownloadUrl(filePath);
+      const response = await fetch(url, { 
+        signal: controller.signal,
+        headers: getAuthHeaders()
       });
+
+      if (!response.ok) throw new Error(`Download failed: ${response.statusText}`);
+
+      const reader = response.body?.getReader();
+      const contentLength = +(response.headers.get('Content-Length') || 0);
       
+      if (!reader) throw new Error("Could not start download stream");
+
+      let receivedLength = 0;
+      const chunks = [];
+
+      while(true) {
+        const {done, value} = await reader.read();
+        if (done) break;
+        
+        chunks.push(value);
+        receivedLength += value.length;
+        
+        if (contentLength) {
+          const progress = Math.round((receivedLength / contentLength) * 100);
+          setDownloadTasks(prev => prev.map(t => 
+            t.id === taskId ? { ...t, progress } : t
+          ));
+        }
+      }
+
+      const blob = new Blob(chunks);
+      const blobUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(blobUrl);
+
+      setDownloadTasks(prev => prev.map(t => 
+        t.id === taskId ? { ...t, status: 'completed', progress: 100 } : t
+      ));
       setShowDownloadComplete(true);
       setTimeout(() => setShowDownloadComplete(false), 3000);
     } catch (error: any) {
-      setDownloadTasks(prev => prev.map(t => 
-        t.id === taskId ? { ...t, status: 'error', error: error.message } : t
-      ));
-      notify(error.message || "Failed to download file", "error");
+      if (error.name === 'AbortError') {
+        setDownloadTasks(prev => prev.map(t => 
+          t.id === taskId ? { ...t, status: 'error', error: 'Cancelled' } : t
+        ));
+      } else {
+        setDownloadTasks(prev => prev.map(t => 
+          t.id === taskId ? { ...t, status: 'error', error: error.message } : t
+        ));
+        notify(error.message || "Failed to download file", "error");
+      }
+    } finally {
+      activeDownloads.current.delete(taskId);
     }
+  };
+
+  const cancelDownload = (taskId: string) => {
+    const controller = activeDownloads.current.get(taskId);
+    if (controller) {
+      controller.abort();
+    }
+    setDownloadTasks(prev => prev.map(t => 
+      t.id === taskId ? { ...t, status: 'error', error: 'Cancelled' } : t
+    ));
   };
 
   const handleDownloadSelected = async () => {
@@ -694,6 +739,17 @@ export default function App() {
     }
   };
 
+  const cancelUpload = (taskId: string) => {
+    cancelledTasks.current.add(taskId);
+    const xhr = activeUploads.current.get(taskId);
+    if (xhr) {
+      xhr.abort();
+    }
+    setUploadTasks(prev => prev.map(t => 
+      t.id === taskId ? { ...t, status: 'error', error: 'Cancelled' } : t
+    ));
+  };
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0) return;
     setShowUploadComplete(false);
@@ -708,68 +764,91 @@ export default function App() {
 
     setUploadTasks(prev => [...prev, ...newTasks]);
 
-    const uploadFile = (file: File, task: UploadTask) => {
-      return new Promise<void>((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        const formData = new FormData();
-        formData.append('files', file);
-
-        xhr.upload.addEventListener('progress', (event) => {
-          if (event.lengthComputable) {
-            const percent = Math.round((event.loaded / event.total) * 100);
-            setUploadTasks(prev => prev.map(t => 
-              t.id === task.id ? { ...t, progress: percent } : t
-            ));
+    const uploadFile = async (file: File, task: UploadTask) => {
+      const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunks
+      const totalChunks = Math.max(1, Math.ceil(file.size / CHUNK_SIZE));
+      
+      try {
+        for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+          if (cancelledTasks.current.has(task.id)) {
+            throw new Error("Upload cancelled");
           }
-        });
 
-        xhr.addEventListener('load', () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            setUploadTasks(prev => prev.map(t => 
-              t.id === task.id ? { ...t, status: 'completed', progress: 100 } : t
-            ));
-            resolve();
-          } else {
-            let errorMsg = `Upload failed (${xhr.status})`;
-            try {
-              const response = JSON.parse(xhr.responseText);
-              errorMsg = response.error || errorMsg;
-            } catch (e) {
-              if (xhr.status === 413) {
-                errorMsg = "File is too large for the server to process (Max 5GB). The request was likely rejected by a proxy or firewall.";
-              } else if (xhr.responseText) {
-                errorMsg = xhr.responseText.length > 100 
-                  ? xhr.responseText.substring(0, 100) + '...' 
-                  : xhr.responseText;
-              }
-            }
+          const start = chunkIndex * CHUNK_SIZE;
+          const end = Math.min(start + CHUNK_SIZE, file.size);
+          const chunk = file.slice(start, end);
+          
+          const formData = new FormData();
+          formData.append('chunk', chunk, file.name);
+
+          await new Promise<void>((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            activeUploads.current.set(task.id, xhr);
             
-            console.error(`[FRONTEND] Upload error (${xhr.status}):`, xhr.responseText);
-            setUploadTasks(prev => prev.map(t => 
-              t.id === task.id ? { ...t, status: 'error', error: errorMsg } : t
-            ));
-            reject(new Error(errorMsg));
-          }
-        });
+            xhr.upload.addEventListener('progress', (event) => {
+              if (event.lengthComputable) {
+                const chunkProgress = event.loaded / event.total;
+                const overallProgress = Math.round(((chunkIndex + chunkProgress) / totalChunks) * 100);
+                setUploadTasks(prev => prev.map(t => 
+                  t.id === task.id ? { ...t, progress: overallProgress } : t
+                ));
+              }
+            });
 
-        xhr.addEventListener('error', () => {
-          const errorMsg = "Network error or request blocked";
-          setUploadTasks(prev => prev.map(t => 
-            t.id === task.id ? { ...t, status: 'error', error: errorMsg } : t
-          ));
-          reject(new Error(errorMsg));
-        });
+            xhr.addEventListener('load', () => {
+              activeUploads.current.delete(task.id);
+              if (xhr.status >= 200 && xhr.status < 300) {
+                resolve();
+              } else {
+                let errorMsg = `Upload failed (${xhr.status})`;
+                try {
+                  const response = JSON.parse(xhr.responseText);
+                  errorMsg = response.error || errorMsg;
+                } catch (e) {
+                  if (xhr.status === 413) {
+                    errorMsg = "Chunk is too large.";
+                  }
+                }
+                reject(new Error(errorMsg));
+              }
+            });
 
-        xhr.open('POST', '/api/files/upload');
-        const headers = getAuthHeaders();
-        Object.entries(headers).forEach(([key, value]) => {
-          xhr.setRequestHeader(key, value as string);
-        });
-        console.log(`[FRONTEND] Uploading ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB) to: ${currentPath || 'default home'}`);
-        xhr.setRequestHeader('x-target-dir', currentPath);
-        xhr.withCredentials = true;
-        xhr.send(formData);
-      });
+            xhr.addEventListener('error', () => {
+              activeUploads.current.delete(task.id);
+              reject(new Error("Network error"));
+            });
+
+            xhr.addEventListener('abort', () => {
+              activeUploads.current.delete(task.id);
+              reject(new Error("Upload cancelled"));
+            });
+            
+            xhr.open('POST', '/api/files/upload-chunk');
+            const headers = getAuthHeaders();
+            Object.entries(headers).forEach(([key, value]) => {
+              xhr.setRequestHeader(key, value as string);
+            });
+            xhr.setRequestHeader('x-target-dir', currentPath);
+            xhr.setRequestHeader('x-file-name', file.name);
+            xhr.setRequestHeader('x-chunk-index', chunkIndex.toString());
+            xhr.setRequestHeader('x-total-chunks', totalChunks.toString());
+            xhr.withCredentials = true;
+            xhr.send(formData);
+          });
+        }
+        
+        setUploadTasks(prev => prev.map(t => 
+          t.id === task.id ? { ...t, status: 'completed', progress: 100 } : t
+        ));
+      } catch (error: any) {
+        setUploadTasks(prev => prev.map(t => 
+          t.id === task.id ? { ...t, status: 'error', error: error.message } : t
+        ));
+        throw error;
+      } finally {
+        activeUploads.current.delete(task.id);
+        cancelledTasks.current.delete(task.id);
+      }
     };
 
     try {
@@ -2011,9 +2090,22 @@ export default function App() {
                                   <div key={task.id} className="p-2 rounded-lg bg-white/5 border border-white/5">
                                     <div className="flex items-center justify-between mb-1.5">
                                       <span className="text-xs font-medium truncate flex-1 pr-2">{task.fileName}</span>
-                                      {task.status === 'completed' && <CheckCircle2 size={14} className="text-green-500 shrink-0" />}
-                                      {task.status === 'error' && <AlertCircle size={14} className="text-red-500 shrink-0" />}
-                                      {task.status === 'uploading' && <span className="text-[10px] text-white/40">{task.progress}%</span>}
+                                      <div className="flex items-center gap-2">
+                                        {task.status === 'completed' && <CheckCircle2 size={14} className="text-green-500 shrink-0" />}
+                                        {task.status === 'error' && <AlertCircle size={14} className="text-red-500 shrink-0" />}
+                                        {task.status === 'uploading' && (
+                                          <>
+                                            <span className="text-[10px] text-white/40">{task.progress}%</span>
+                                            <button 
+                                              onClick={() => cancelUpload(task.id)}
+                                              className="p-1 hover:bg-white/10 rounded text-white/40 hover:text-red-400 transition-colors"
+                                              title="Cancel Upload"
+                                            >
+                                              <X size={12} />
+                                            </button>
+                                          </>
+                                        )}
+                                      </div>
                                     </div>
                                     {task.status === 'uploading' && (
                                       <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden">
@@ -2066,9 +2158,22 @@ export default function App() {
                                   <div key={task.id} className="p-2 rounded-lg bg-white/5 border border-white/5">
                                     <div className="flex items-center justify-between mb-1.5">
                                       <span className="text-xs font-medium truncate flex-1 pr-2">{task.fileName}</span>
-                                      {task.status === 'completed' && <CheckCircle2 size={14} className="text-green-500 shrink-0" />}
-                                      {task.status === 'error' && <AlertCircle size={14} className="text-red-500 shrink-0" />}
-                                      {task.status === 'downloading' && <span className="text-[10px] text-white/40">{task.progress}%</span>}
+                                      <div className="flex items-center gap-2">
+                                        {task.status === 'completed' && <CheckCircle2 size={14} className="text-green-500 shrink-0" />}
+                                        {task.status === 'error' && <AlertCircle size={14} className="text-red-500 shrink-0" />}
+                                        {task.status === 'downloading' && (
+                                          <>
+                                            <span className="text-[10px] text-white/40">{task.progress}%</span>
+                                            <button 
+                                              onClick={() => cancelDownload(task.id)}
+                                              className="p-1 hover:bg-white/10 rounded text-white/40 hover:text-red-400 transition-colors"
+                                              title="Cancel Download"
+                                            >
+                                              <X size={12} />
+                                            </button>
+                                          </>
+                                        )}
+                                      </div>
                                     </div>
                                     {task.status === 'downloading' && (
                                       <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden">

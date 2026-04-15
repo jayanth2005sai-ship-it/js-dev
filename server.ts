@@ -175,6 +175,50 @@ async function startServer() {
     });
   });
 
+const uploadChunk = multer({ dest: os.tmpdir() });
+
+  app.post("/api/files/upload-chunk", requireAuth, uploadChunk.single('chunk'), (req, res) => {
+    const targetDir = req.headers['x-target-dir'] as string;
+    const fileName = req.headers['x-file-name'] as string;
+    const chunkIndex = parseInt(req.headers['x-chunk-index'] as string);
+    const totalChunks = parseInt(req.headers['x-total-chunks'] as string);
+
+    if (!targetDir || !fileName || isNaN(chunkIndex) || isNaN(totalChunks) || !req.file) {
+      return res.status(400).json({ error: "Missing required headers or file chunk" });
+    }
+
+    const tempFilePath = path.join(targetDir, `${fileName}.part`);
+    const finalFilePath = path.join(targetDir, fileName);
+
+    try {
+      // If it's the first chunk, make sure we start fresh
+      if (chunkIndex === 0 && fsSync.existsSync(tempFilePath)) {
+        fsSync.unlinkSync(tempFilePath);
+      }
+
+      // Append chunk to temp file
+      const chunkData = fsSync.readFileSync(req.file.path);
+      fsSync.appendFileSync(tempFilePath, chunkData);
+      
+      // Remove the uploaded chunk file
+      fsSync.unlinkSync(req.file.path);
+
+      if (chunkIndex === totalChunks - 1) {
+        // Last chunk, rename temp file to final file
+        if (fsSync.existsSync(finalFilePath)) {
+           fsSync.unlinkSync(finalFilePath);
+        }
+        fsSync.renameSync(tempFilePath, finalFilePath);
+        res.json({ success: true, message: "File uploaded successfully", completed: true });
+      } else {
+        res.json({ success: true, message: "Chunk uploaded successfully", completed: false });
+      }
+    } catch (error: any) {
+      console.error("[UPLOAD CHUNK] Error:", error);
+      res.status(500).json({ error: "Failed to process chunk" });
+    }
+  });
+
   app.use(express.json({ limit: '5120mb' }));
   app.use(express.urlencoded({ limit: '5120mb', extended: true }));
   
