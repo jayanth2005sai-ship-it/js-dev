@@ -48,6 +48,7 @@ import {
   FileArchive,
   FilePenLine,
   Laptop,
+  MonitorSmartphone,
   RotateCw,
   RotateCcw,
   Database as DatabaseIcon,
@@ -62,6 +63,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import Fuse, { FuseResultMatch } from 'fuse.js';
 import { Toaster, toast } from 'sonner';
+import { UAParser } from 'ua-parser-js';
 
 // Types
 interface AppIcon {
@@ -117,6 +119,13 @@ interface AppNotification {
   type: 'success' | 'error' | 'info';
   timestamp: Date;
   read: boolean;
+}
+
+interface ConnectedDevice {
+  id: string;
+  ip: string;
+  userAgent: string;
+  lastActive: number;
 }
 
 // Path helpers for frontend
@@ -299,6 +308,7 @@ export default function App() {
   });
   const [wallpaperError, setWallpaperError] = useState('');
   const [wallpaperInputUrl, setWallpaperInputUrl] = useState('');
+  const [connectedDevices, setConnectedDevices] = useState<ConnectedDevice[]>([]);
 
   // Helper to get auth headers
   const getAuthHeaders = () => {
@@ -346,11 +356,12 @@ export default function App() {
           const data = await response.json();
           setSystemStats(data);
         } else {
-          const errData = await response.json();
-          console.error("Stats API error:", errData);
+          const text = await response.text();
+          console.error(`Stats API error (${response.status}):`, text);
         }
       } catch (error) {
-        console.error("Failed to fetch stats:", error);
+        if (error instanceof Error && error.name === 'AbortError') return;
+        console.error("Failed to fetch stats (Network Error):", error);
       }
     };
 
@@ -408,6 +419,24 @@ export default function App() {
       }
     };
   }, [previewFile, currentPath]);
+
+  useEffect(() => {
+    if (activeModal === 'settings' && isAuthenticated) {
+      const fetchDevices = async () => {
+        try {
+          const res = await fetch('/api/devices', { headers: getAuthHeaders() });
+          if (res.ok) {
+            setConnectedDevices(await res.json());
+          }
+        } catch (e) {
+          console.error('Failed to fetch connected devices', e);
+        }
+      };
+      fetchDevices();
+      const interval = setInterval(fetchDevices, 5000);
+      return () => clearInterval(interval);
+    }
+  }, [activeModal, isAuthenticated]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -480,9 +509,10 @@ export default function App() {
     const fileSize = fileItem?.size || 0;
     const fileName = path.basename(filePath);
     const taskId = Math.random().toString(36).substring(7);
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
-    // For very large files on mobile, use native download to avoid memory issues
-    if (fileSize > 100 * 1024 * 1024) {
+    // For very large files or on mobile, use native download for maximum speed and stability
+    if (isMobile || fileSize > 100 * 1024 * 1024) {
       const url = getDownloadUrl(filePath);
       const a = document.createElement('a');
       a.href = url;
@@ -490,7 +520,7 @@ export default function App() {
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      notify(`Large file download started: ${fileName}. Use browser download manager to manage.`, "info");
+      notify(`Download started: ${fileName}. Check your browser's download manager for progress.`, "info");
       return;
     }
 
@@ -741,9 +771,11 @@ export default function App() {
 
   const cancelUpload = (taskId: string) => {
     cancelledTasks.current.add(taskId);
-    const xhr = activeUploads.current.get(taskId);
-    if (xhr) {
-      xhr.abort();
+    for (const [key, xhr] of activeUploads.current.entries()) {
+      if (key.startsWith(taskId)) {
+        xhr.abort();
+        activeUploads.current.delete(key);
+      }
     }
     setUploadTasks(prev => prev.map(t => 
       t.id === taskId ? { ...t, status: 'error', error: 'Cancelled' } : t
@@ -767,74 +799,110 @@ export default function App() {
     const uploadFile = async (file: File, task: UploadTask) => {
       const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunks
       const totalChunks = Math.max(1, Math.ceil(file.size / CHUNK_SIZE));
+      const CONCURRENCY = 3; // Upload 3 chunks in parallel for better speed
       
-      try {
-        for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
-          if (cancelledTasks.current.has(task.id)) {
-            throw new Error("Upload cancelled");
-          }
+      const chunkProgress = new Array(totalChunks).fill(0);
+      const updateOverallProgress = () => {
+        const totalProgress = chunkProgress.reduce((a, b) => a + b, 0);
+        const overallProgress = Math.round((totalProgress / totalChunks) * 100);
+        setUploadTasks(prev => prev.map(t => 
+          t.id === task.id ? { ...t, progress: overallProgress } : t
+        ));
+      };
 
-          const start = chunkIndex * CHUNK_SIZE;
-          const end = Math.min(start + CHUNK_SIZE, file.size);
-          const chunk = file.slice(start, end);
+      const uploadChunkWithIndex = async (chunkIndex: number) => {
+        if (cancelledTasks.current.has(task.id)) return;
+
+        const start = chunkIndex * CHUNK_SIZE;
+        const end = Math.min(start + CHUNK_SIZE, file.size);
+        const chunk = file.slice(start, end);
+        
+        const formData = new FormData();
+        formData.append('chunk', chunk, file.name);
+
+        await new Promise<void>((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          const chunkTaskId = `${task.id}-${chunkIndex}`;
+          activeUploads.current.set(chunkTaskId, xhr);
           
-          const formData = new FormData();
-          formData.append('chunk', chunk, file.name);
-
-          await new Promise<void>((resolve, reject) => {
-            const xhr = new XMLHttpRequest();
-            activeUploads.current.set(task.id, xhr);
-            
-            xhr.upload.addEventListener('progress', (event) => {
-              if (event.lengthComputable) {
-                const chunkProgress = event.loaded / event.total;
-                const overallProgress = Math.round(((chunkIndex + chunkProgress) / totalChunks) * 100);
-                setUploadTasks(prev => prev.map(t => 
-                  t.id === task.id ? { ...t, progress: overallProgress } : t
-                ));
-              }
-            });
-
-            xhr.addEventListener('load', () => {
-              activeUploads.current.delete(task.id);
-              if (xhr.status >= 200 && xhr.status < 300) {
-                resolve();
-              } else {
-                let errorMsg = `Upload failed (${xhr.status})`;
-                try {
-                  const response = JSON.parse(xhr.responseText);
-                  errorMsg = response.error || errorMsg;
-                } catch (e) {
-                  if (xhr.status === 413) {
-                    errorMsg = "Chunk is too large.";
-                  }
-                }
-                reject(new Error(errorMsg));
-              }
-            });
-
-            xhr.addEventListener('error', () => {
-              activeUploads.current.delete(task.id);
-              reject(new Error("Network error"));
-            });
-
-            xhr.addEventListener('abort', () => {
-              activeUploads.current.delete(task.id);
-              reject(new Error("Upload cancelled"));
-            });
-            
-            xhr.open('POST', '/api/files/upload-chunk');
-            const headers = getAuthHeaders();
-            Object.entries(headers).forEach(([key, value]) => {
-              xhr.setRequestHeader(key, value as string);
-            });
-            xhr.setRequestHeader('x-target-dir', currentPath);
-            xhr.setRequestHeader('x-file-name', file.name);
-            xhr.setRequestHeader('x-chunk-index', chunkIndex.toString());
-            xhr.setRequestHeader('x-total-chunks', totalChunks.toString());
-            xhr.withCredentials = true;
-            xhr.send(formData);
+          xhr.upload.addEventListener('progress', (event) => {
+            if (event.lengthComputable) {
+              chunkProgress[chunkIndex] = event.loaded / event.total;
+              updateOverallProgress();
+            }
           });
+
+          xhr.addEventListener('load', () => {
+            activeUploads.current.delete(chunkTaskId);
+            if (xhr.status >= 200 && xhr.status < 300) {
+              chunkProgress[chunkIndex] = 1;
+              updateOverallProgress();
+              resolve();
+            } else {
+              let errorMsg = `Chunk ${chunkIndex} failed (${xhr.status})`;
+              try {
+                const response = JSON.parse(xhr.responseText);
+                errorMsg = response.error || errorMsg;
+              } catch (e) {}
+              reject(new Error(errorMsg));
+            }
+          });
+
+          xhr.addEventListener('error', () => {
+            activeUploads.current.delete(chunkTaskId);
+            reject(new Error("Network error"));
+          });
+
+          xhr.addEventListener('abort', () => {
+            activeUploads.current.delete(chunkTaskId);
+            reject(new Error("Upload cancelled"));
+          });
+          
+          xhr.open('POST', '/api/files/upload-chunk');
+          const headers = getAuthHeaders();
+          Object.entries(headers).forEach(([key, value]) => {
+            xhr.setRequestHeader(key, value as string);
+          });
+          xhr.setRequestHeader('x-target-dir', encodeURIComponent(currentPath));
+          xhr.setRequestHeader('x-file-name', encodeURIComponent(file.name));
+          xhr.setRequestHeader('x-chunk-index', chunkIndex.toString());
+          xhr.setRequestHeader('x-total-chunks', totalChunks.toString());
+          xhr.setRequestHeader('x-chunk-offset', start.toString());
+          xhr.withCredentials = true;
+          xhr.send(formData);
+        });
+      };
+
+      try {
+        // Parallel execution with concurrency limit
+        const queue = Array.from({ length: totalChunks }, (_, i) => i);
+        const workers = Array(CONCURRENCY).fill(null).map(async () => {
+          while (queue.length > 0 && !cancelledTasks.current.has(task.id)) {
+            const idx = queue.shift()!;
+            await uploadChunkWithIndex(idx);
+          }
+        });
+        
+        await Promise.all(workers);
+        
+        if (cancelledTasks.current.has(task.id)) throw new Error("Upload cancelled");
+
+        // Finalize the upload
+        const finalizeResponse = await fetch('/api/files/upload-finalize', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...getAuthHeaders()
+          },
+          body: JSON.stringify({
+            targetDir: currentPath,
+            fileName: file.name
+          })
+        });
+
+        if (!finalizeResponse.ok) {
+          const errData = await finalizeResponse.json().catch(() => ({}));
+          throw new Error(errData.error || "Failed to finalize upload");
         }
         
         setUploadTasks(prev => prev.map(t => 
@@ -846,7 +914,13 @@ export default function App() {
         ));
         throw error;
       } finally {
-        activeUploads.current.delete(task.id);
+        // Clean up any remaining active chunks for this task
+        for (const [key, xhr] of activeUploads.current.entries()) {
+          if (key.startsWith(task.id)) {
+            xhr.abort();
+            activeUploads.current.delete(key);
+          }
+        }
         cancelledTasks.current.delete(task.id);
       }
     };
@@ -1855,6 +1929,50 @@ export default function App() {
                           </button>
                         </div>
                       )}
+
+                      <div className="bg-white/5 p-6 rounded-2xl border border-white/10 mt-8">
+                        <h4 className="text-sm font-bold text-white/80 mb-4 flex items-center gap-2">
+                          <Laptop size={16} /> Connected Devices
+                        </h4>
+                        <div className="space-y-3">
+                          {connectedDevices.length === 0 ? (
+                            <p className="text-xs text-white/40">No devices connected.</p>
+                          ) : (
+                            connectedDevices.map(device => {
+                              const isCurrent = device.userAgent === navigator.userAgent;
+                              const isMobile = /Mobi|Android/i.test(device.userAgent);
+                              
+                              return (
+                                <div key={device.id} className="p-3 bg-white/5 border border-white/5 rounded-xl flex items-center justify-between gap-3">
+                                  <div className="flex items-center gap-3 w-full min-w-0">
+                                    <div className="p-2 bg-blue-500/20 text-blue-400 rounded-lg shrink-0">
+                                      {isMobile ? <MonitorSmartphone size={16} /> : <Laptop size={16} />}
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-center gap-2">
+                                        <p className="text-sm font-medium text-white truncate" title={device.userAgent}>
+                                          {typeof UAParser !== 'undefined' ? new UAParser(device.userAgent).getBrowser().name || 'Unknown Browser' : device.userAgent.split(' ')[0]}
+                                        </p>
+                                        {isCurrent && (
+                                          <span className="shrink-0 text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 bg-emerald-500/20 text-emerald-400 rounded-full">
+                                            Current
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="flex items-center gap-1.5 mt-0.5">
+                                        <div className={`w-1.5 h-1.5 rounded-full ${Date.now() - device.lastActive < 60000 ? 'bg-emerald-400' : 'bg-slate-500'}`} />
+                                        <p className="text-xs text-white/40 truncate">
+                                          IP: {device.ip} • Last active {Math.round((Date.now() - device.lastActive) / 1000)}s ago
+                                        </p>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 ) : activeModal === 'files' ? (

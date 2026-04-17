@@ -119,6 +119,40 @@ async function startServer() {
   await setupDirectories();
 
   app.use(cookieParser());
+  app.use(express.json({ limit: '5120mb' }));
+  app.use(express.urlencoded({ limit: '5120mb', extended: true }));
+  
+  // Track connected devices
+  const activeDevices = new Map<string, { id: string, ip: string, userAgent: string, lastActive: number }>();
+  
+  app.use((req, res, next) => {
+    const ip = req.headers['x-forwarded-for'] as string || req.socket.remoteAddress || 'unknown';
+    const userAgent = req.headers['user-agent'] || 'unknown';
+    const idHash = crypto.createHash('md5').update(`${ip}-${userAgent}`).digest('hex');
+    
+    activeDevices.set(idHash, {
+      id: idHash,
+      ip: ip.split(',')[0].trim(),
+      userAgent,
+      lastActive: Date.now()
+    });
+    
+    next();
+  });
+
+  // Cleanup stale devices every minute (inactive for > 15 mins)
+  setInterval(() => {
+    const now = Date.now();
+    for (const [id, device] of activeDevices.entries()) {
+      if (now - device.lastActive > 15 * 60 * 1000) {
+        activeDevices.delete(id);
+      }
+    }
+  }, 60 * 1000);
+
+  app.get("/api/devices", (req, res) => {
+    res.json(Array.from(activeDevices.values()));
+  });
   
   // Authentication Middleware
   const requireAuth = (req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -178,12 +212,13 @@ async function startServer() {
 const uploadChunk = multer({ dest: os.tmpdir() });
 
   app.post("/api/files/upload-chunk", requireAuth, uploadChunk.single('chunk'), (req, res) => {
-    const targetDir = req.headers['x-target-dir'] as string;
-    const fileName = req.headers['x-file-name'] as string;
+    const targetDir = decodeURIComponent(req.headers['x-target-dir'] as string);
+    const fileName = decodeURIComponent(req.headers['x-file-name'] as string);
     const chunkIndex = parseInt(req.headers['x-chunk-index'] as string);
     const totalChunks = parseInt(req.headers['x-total-chunks'] as string);
+    const offset = parseInt(req.headers['x-chunk-offset'] as string);
 
-    if (!targetDir || !fileName || isNaN(chunkIndex) || isNaN(totalChunks) || !req.file) {
+    if (!targetDir || !fileName || isNaN(chunkIndex) || isNaN(totalChunks) || isNaN(offset) || !req.file) {
       return res.status(400).json({ error: "Missing required headers or file chunk" });
     }
 
@@ -191,37 +226,52 @@ const uploadChunk = multer({ dest: os.tmpdir() });
     const finalFilePath = path.join(targetDir, fileName);
 
     try {
-      // If it's the first chunk, make sure we start fresh
-      if (chunkIndex === 0 && fsSync.existsSync(tempFilePath)) {
-        fsSync.unlinkSync(tempFilePath);
+      // Ensure temp file exists without truncating
+      if (!fsSync.existsSync(tempFilePath)) {
+        fsSync.writeFileSync(tempFilePath, Buffer.alloc(0));
       }
 
-      // Append chunk to temp file
+      // Write chunk at specific offset
       const chunkData = fsSync.readFileSync(req.file.path);
-      fsSync.appendFileSync(tempFilePath, chunkData);
+      const fd = fsSync.openSync(tempFilePath, 'r+');
+      fsSync.writeSync(fd, chunkData, 0, chunkData.length, offset);
+      fsSync.closeSync(fd);
       
       // Remove the uploaded chunk file
       fsSync.unlinkSync(req.file.path);
 
-      if (chunkIndex === totalChunks - 1) {
-        // Last chunk, rename temp file to final file
-        if (fsSync.existsSync(finalFilePath)) {
-           fsSync.unlinkSync(finalFilePath);
-        }
-        fsSync.renameSync(tempFilePath, finalFilePath);
-        res.json({ success: true, message: "File uploaded successfully", completed: true });
-      } else {
-        res.json({ success: true, message: "Chunk uploaded successfully", completed: false });
-      }
+      res.json({ success: true, message: "Chunk uploaded successfully" });
     } catch (error: any) {
       console.error("[UPLOAD CHUNK] Error:", error);
       res.status(500).json({ error: "Failed to process chunk" });
     }
   });
 
-  app.use(express.json({ limit: '5120mb' }));
-  app.use(express.urlencoded({ limit: '5120mb', extended: true }));
-  
+  app.post("/api/files/upload-finalize", requireAuth, (req, res) => {
+    const { targetDir, fileName } = req.body;
+    if (!targetDir || !fileName) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    const tempFilePath = path.join(targetDir, `${fileName}.part`);
+    const finalFilePath = path.join(targetDir, fileName);
+
+    try {
+      if (fsSync.existsSync(tempFilePath)) {
+        if (fsSync.existsSync(finalFilePath)) {
+          fsSync.unlinkSync(finalFilePath);
+        }
+        fsSync.renameSync(tempFilePath, finalFilePath);
+        res.json({ success: true, message: "File finalized successfully" });
+      } else {
+        res.status(404).json({ error: "Temporary file not found" });
+      }
+    } catch (error: any) {
+      console.error("[UPLOAD FINALIZE] Error:", error);
+      res.status(500).json({ error: "Failed to finalize file" });
+    }
+  });
+
   // Serve public files statically
   app.use(express.static(path.join(process.cwd(), 'public')));
   app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
@@ -308,7 +358,13 @@ const uploadChunk = multer({ dest: os.tmpdir() });
       let diskUsedGB = "0.0";
       let diskTotalGB = "0.0";
       try {
-        const fsStats = await si.fsSize();
+        // Add timeout to si.fsSize() as it can hang in some environments
+        const fsStatsPromise = si.fsSize();
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Disk stats timeout')), 2000)
+        );
+        const fsStats = await Promise.race([fsStatsPromise, timeoutPromise]) as any[];
+        
         let mainDisk = fsStats.find(d => d.mount === '/');
         if (!mainDisk) {
           mainDisk = fsStats.filter(d => d.fs !== 'none' && d.type !== 'overlay' && !d.mount.startsWith('/snap/'))
@@ -630,6 +686,12 @@ const uploadChunk = multer({ dest: os.tmpdir() });
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
+
+  // Global Error Handler
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    console.error("[GLOBAL ERROR]:", err);
+    res.status(500).json({ error: "Internal Server Error", details: err.message });
+  });
 
   const server = http.createServer(app);
   const wss = new WebSocketServer({ server, path: '/api/terminal/ws' });
