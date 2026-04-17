@@ -56,6 +56,7 @@ import {
   ClipboardList,
   Menu,
   Eye,
+  EyeOff,
   CheckCircle2,
   AlertCircle,
   CheckSquare
@@ -299,6 +300,7 @@ export default function App() {
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const [loginUsername, setLoginUsername] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loginError, setLoginError] = useState('');
 
   // Wallpaper State
@@ -1173,59 +1175,124 @@ export default function App() {
 
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen bg-[#0a0a0a] text-white font-sans selection:bg-blue-500/30 overflow-hidden relative flex items-center justify-center">
-        <div 
-          className={`absolute inset-0 bg-cover bg-center bg-no-repeat opacity-40 scale-105 ${wallpaperUrl === DEFAULT_WALLPAPER ? 'blur-sm' : ''}`}
+      <div className="min-h-screen bg-[#0a0a0a] font-sans selection:bg-blue-500/30 overflow-hidden relative flex items-center justify-center">
+        {/* Animated Background */}
+        <motion.div 
+          initial={{ opacity: 0, scale: 1.1 }}
+          animate={{ opacity: 0.4, scale: 1.05 }}
+          transition={{ duration: 1.5, ease: "easeOut" }}
+          className={`absolute inset-0 bg-cover bg-center bg-no-repeat ${wallpaperUrl === DEFAULT_WALLPAPER ? 'blur-sm' : ''}`}
           style={{ backgroundImage: `url(${wallpaperUrl})` }}
         />
-        <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/60" />
+        <div className="absolute inset-0 bg-gradient-to-b from-[#0a0a0a]/60 via-transparent to-[#0a0a0a]/90 backdrop-blur-[2px]" />
+        
+        {/* Glow Effects */}
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-blue-500/20 rounded-full blur-[120px] pointer-events-none" />
         
         <motion.div 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="relative z-10 w-full max-w-md mx-4 p-6 md:p-8 rounded-3xl bg-black/40 backdrop-blur-2xl border border-white/10 shadow-2xl"
+          initial={{ opacity: 0, y: 30, filter: "blur(10px)" }}
+          animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+          transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+          className="relative z-10 w-full max-w-md mx-4"
         >
-          <div className="flex flex-col items-center mb-8">
-            <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-500/20 mb-4">
-              <LayoutGrid size={32} />
-            </div>
-            <h1 className="text-2xl font-bold tracking-tight">Welcome to CasaDash</h1>
-            <p className="text-sm text-white/60 mt-2 text-center">Enter your server's OS credentials to continue.</p>
-          </div>
-
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div>
-              <input 
-                type="text" 
-                placeholder="Username"
-                value={loginUsername}
-                onChange={(e) => setLoginUsername(e.target.value)}
-                className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-all"
-                required
-              />
-            </div>
-            <div>
-              <input 
-                type="password" 
-                placeholder="Password"
-                value={loginPassword}
-                onChange={(e) => setLoginPassword(e.target.value)}
-                className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-all"
-                required
-              />
-            </div>
+          <div className="relative p-8 md:p-10 rounded-3xl bg-black/40 backdrop-blur-2xl border border-white/10 shadow-2xl overflow-hidden group hover:border-white/20 transition-colors duration-500">
+            {/* Inner top highlight */}
+            <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent" />
             
-            {loginError && (
-              <p className="text-red-400 text-sm text-center">{loginError}</p>
-            )}
-
-            <button 
-              type="submit"
-              className="w-full bg-blue-600 hover:bg-blue-500 text-white font-medium py-3 rounded-xl transition-colors shadow-lg shadow-blue-500/20 mt-4"
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ duration: 0.5, delay: 0.2, ease: "easeOut" }}
+              className="flex flex-col items-center mb-8"
             >
-              Log In
-            </button>
-          </form>
+              <div className="w-16 h-16 bg-gradient-to-tr from-blue-600 to-blue-400 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-500/30 mb-5 relative group-hover:shadow-blue-500/50 transition-shadow duration-500">
+                <div className="absolute inset-0 bg-white/20 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                <LayoutGrid size={32} className="text-white relative z-10" />
+              </div>
+              <motion.h1 
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.4, delay: 0.3 }}
+                className="text-2xl md:text-3xl font-bold tracking-tight text-white mb-2"
+              >
+                Welcome to CasaDash
+              </motion.h1>
+              <motion.p 
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.4, delay: 0.4 }}
+                className="text-sm font-medium text-white/50 text-center"
+              >
+                Enter your server's credentials to continue
+              </motion.p>
+            </motion.div>
+
+            <form onSubmit={handleLogin} className="space-y-5">
+              <motion.div
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.4, delay: 0.5 }}
+              >
+                <input 
+                  type="text" 
+                  placeholder="Username"
+                  value={loginUsername}
+                  onChange={(e) => setLoginUsername(e.target.value)}
+                  className="w-full bg-white/5 border border-white/10 rounded-xl py-3.5 px-4 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:bg-white/10 transition-all duration-300"
+                  required
+                />
+              </motion.div>
+              <motion.div
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.4, delay: 0.6 }}
+                className="relative"
+              >
+                <input 
+                  type={showPassword ? "text" : "password"} 
+                  placeholder="Password"
+                  value={loginPassword}
+                  onChange={(e) => setLoginPassword(e.target.value)}
+                  className="w-full bg-white/5 border border-white/10 rounded-xl py-3.5 pl-4 pr-12 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:bg-white/10 transition-all duration-300"
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 text-white/40 hover:text-white/80 transition-colors"
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </motion.div>
+              
+              <AnimatePresence>
+                {loginError && (
+                  <motion.p 
+                    initial={{ opacity: 0, height: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, height: 'auto', scale: 1 }}
+                    exit={{ opacity: 0, height: 0, scale: 0.9 }}
+                    className="text-red-400/90 text-sm font-medium text-center bg-red-400/10 py-2 px-3 rounded-lg border border-red-400/20"
+                  >
+                    {loginError}
+                  </motion.p>
+                )}
+              </AnimatePresence>
+
+              <motion.button 
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.4, delay: 0.7 }}
+                whileHover={{ scale: 1.01 }}
+                whileTap={{ scale: 0.98 }}
+                type="submit"
+                className="relative w-full overflow-hidden bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3.5 rounded-xl transition-all shadow-lg shadow-blue-500/20 mt-2 flex items-center justify-center group/btn"
+              >
+                <span className="relative z-10 flex items-center gap-2">
+                  Log In
+                </span>
+              </motion.button>
+            </form>
+          </div>
         </motion.div>
       </div>
     );
