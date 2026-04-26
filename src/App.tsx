@@ -173,6 +173,7 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import Terminal from './components/Terminal';
 import { getFileIcon } from './components/FileIcon';
+import mammoth from 'mammoth';
 
 export default function App() {
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -218,6 +219,7 @@ export default function App() {
   const [newPermissions, setNewPermissions] = useState('');
   const [previewFile, setPreviewFile] = useState<FileItem | null>(null);
   const [previewContent, setPreviewContent] = useState<string | null>(null);
+  const [docHtml, setDocHtml] = useState<string | null>(null);
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
   const [imageRotation, setImageRotation] = useState(0);
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
@@ -381,6 +383,7 @@ export default function App() {
 
     const fetchPreview = async () => {
       setImageRotation(0);
+      setDocHtml(null);
       if (!previewFile) {
         setPreviewContent(null);
         return;
@@ -388,6 +391,7 @@ export default function App() {
       
       const ext = path.extname(previewFile.name).toLowerCase();
       const isText = ['.txt', '.md', '.json', '.js', '.ts', '.tsx', '.jsx', '.html', '.css', '.csv', '.log', '.env', '.py', '.sh', '.yaml', '.yml', '.xml'].includes(ext);
+      const isDocx = ext === '.docx';
       
       if (isText) {
         setIsPreviewLoading(true);
@@ -405,6 +409,26 @@ export default function App() {
           }
         } catch (error) {
           setPreviewContent("Error loading file content.");
+        } finally {
+          setIsPreviewLoading(false);
+        }
+      } else if (isDocx) {
+        setIsPreviewLoading(true);
+        try {
+          const filePath = path.join(currentPath, previewFile.name);
+          const response = await fetch(`/api/files/raw?path=${encodeURIComponent(filePath)}`, {
+            headers: { ...getAuthHeaders() },
+            credentials: 'include'
+          });
+          if (response.ok) {
+              const arrayBuffer = await response.arrayBuffer();
+              const result = await mammoth.convertToHtml({ arrayBuffer });
+              setDocHtml(result.value);
+          } else {
+              setDocHtml("<p>Failed to load document content.</p>");
+          }
+        } catch(error) {
+          setDocHtml("<p>Error loading document.</p>");
         } finally {
           setIsPreviewLoading(false);
         }
@@ -2660,6 +2684,41 @@ export default function App() {
                                       crossOrigin="use-credentials"
                                       className="w-full max-w-md" 
                                     />
+                                  </div>
+                                ) : previewFile.name.match(/\.pdf$/i) ? (
+                                  <div className="w-full h-full bg-white rounded-lg overflow-hidden">
+                                    <iframe 
+                                      src={`${getMediaUrl(path.join(currentPath, previewFile.name))}#toolbar=0`} 
+                                      className="w-full h-full border-0" 
+                                      title={previewFile.name} 
+                                    />
+                                  </div>
+                                ) : previewFile.name.match(/\.docx$/i) ? (
+                                  <div className="w-full h-full overflow-auto bg-white p-8 text-black rounded-lg">
+                                    {isPreviewLoading ? (
+                                      <div className="w-full h-full flex flex-col items-center justify-center gap-4 text-black/40">
+                                        <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                                        <p className="text-sm">Loading document...</p>
+                                      </div>
+                                    ) : docHtml ? (
+                                      <div className="docx-content max-w-3xl mx-auto" dangerouslySetInnerHTML={{ __html: docHtml }} />
+                                    ) : (
+                                      <div className="w-full h-full flex flex-col items-center justify-center text-gray-500">
+                                        <p>Could not preview document.</p>
+                                      </div>
+                                    )}
+                                    <style>{`
+                                      .docx-content { font-family: var(--font-sans); line-height: 1.6; }
+                                      .docx-content h1 { font-size: 2em; font-weight: bold; margin-bottom: 0.5em; margin-top: 1em; }
+                                      .docx-content h2 { font-size: 1.5em; font-weight: bold; margin-bottom: 0.5em; margin-top: 1em; }
+                                      .docx-content h3 { font-size: 1.17em; font-weight: bold; margin-bottom: 0.5em; margin-top: 1em; }
+                                      .docx-content p { margin-bottom: 1em; }
+                                      .docx-content ul { list-style-type: disc; margin-left: 2em; margin-bottom: 1em; }
+                                      .docx-content ol { list-style-type: decimal; margin-left: 2em; margin-bottom: 1em; }
+                                      .docx-content table { border-collapse: collapse; width: 100%; margin-bottom: 1em; }
+                                      .docx-content th, .docx-content td { border: 1px solid #ccc; padding: 8px; }
+                                      .docx-content img { max-width: 100%; height: auto; }
+                                    `}</style>
                                   </div>
                                 ) : isPreviewLoading ? (
                                   <div className="w-full h-full flex flex-col items-center justify-center gap-4 text-white/40">
