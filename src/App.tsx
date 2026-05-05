@@ -182,7 +182,7 @@ export default function App() {
     cpu: { usage: 0, cores: 0, brand: '', speed: 0 },
     ram: { usagePercent: 0, usedGB: '0', totalGB: '0' },
     disk: { usagePercent: 0, usedGB: '0', totalGB: '0' },
-    os: { distro: '', release: '', uptime: 0, hostname: 'CasaDash' }
+    os: { distro: '', release: '', uptime: 0, hostname: 'NestOs' }
   });
 
   // Modal States
@@ -194,7 +194,7 @@ export default function App() {
   const [showInfoPanel, setShowInfoPanel] = useState(false);
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [hiddenAppIds, setHiddenAppIds] = useState<Set<string>>(() => {
-    const saved = localStorage.getItem('casadash_hidden_apps');
+    const saved = localStorage.getItem('nestos_hidden_apps');
     return saved ? new Set(JSON.parse(saved)) : new Set();
   });
   const [isEditMode, setIsEditMode] = useState(false);
@@ -308,11 +308,24 @@ export default function App() {
   // Wallpaper State
   const DEFAULT_WALLPAPER = 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=2564&auto=format&fit=crop';
   const [wallpaperUrl, setWallpaperUrl] = useState(() => {
-    return localStorage.getItem('casadash_wallpaper') || DEFAULT_WALLPAPER;
+    return localStorage.getItem('nestos_wallpaper') || DEFAULT_WALLPAPER;
   });
   const [wallpaperError, setWallpaperError] = useState('');
   const [wallpaperInputUrl, setWallpaperInputUrl] = useState('');
   const [connectedDevices, setConnectedDevices] = useState<ConnectedDevice[]>([]);
+
+  const [isNavVisible, setIsNavVisible] = useState(true);
+  const [lastScrollY, setLastScrollY] = useState(0);
+
+  const handleMainScroll = (e: React.UIEvent<HTMLElement>) => {
+    const currentScrollY = e.currentTarget.scrollTop;
+    if (currentScrollY > lastScrollY && currentScrollY > 50) {
+      setIsNavVisible(false);
+    } else if (currentScrollY < lastScrollY) {
+      setIsNavVisible(true);
+    }
+    setLastScrollY(currentScrollY);
+  };
 
   // Helper to get auth headers
   const getAuthHeaders = () => {
@@ -359,6 +372,10 @@ export default function App() {
         if (response.ok) {
           const data = await response.json();
           setSystemStats(data);
+        } else if (response.status === 401) {
+          localStorage.removeItem('auth_token');
+          setIsAuthenticated(false);
+          console.error('Session expired, logging out.');
         } else {
           const text = await response.text();
           console.error(`Stats API error (${response.status}):`, text);
@@ -1106,7 +1123,7 @@ export default function App() {
       if (response.ok) {
         const data = await response.json();
         setWallpaperUrl(data.url);
-        localStorage.setItem('casadash_wallpaper', data.url);
+        localStorage.setItem('nestos_wallpaper', data.url);
         setWallpaperError('Wallpaper updated successfully!');
         setTimeout(() => setWallpaperError(''), 3000);
       } else {
@@ -1117,7 +1134,7 @@ export default function App() {
           const base64data = reader.result as string;
           try {
             setWallpaperUrl(base64data);
-            localStorage.setItem('casadash_wallpaper', base64data);
+            localStorage.setItem('nestos_wallpaper', base64data);
             setWallpaperError('Wallpaper saved locally!');
             setTimeout(() => setWallpaperError(''), 3000);
           } catch (e) {
@@ -1134,7 +1151,7 @@ export default function App() {
   const handleSetWallpaperUrl = () => {
     if (!wallpaperInputUrl.trim()) return;
     setWallpaperUrl(wallpaperInputUrl);
-    localStorage.setItem('casadash_wallpaper', wallpaperInputUrl);
+    localStorage.setItem('nestos_wallpaper', wallpaperInputUrl);
     setWallpaperInputUrl('');
     setWallpaperError('Wallpaper updated from URL!');
     setTimeout(() => setWallpaperError(''), 3000);
@@ -1142,7 +1159,7 @@ export default function App() {
 
   const handleResetWallpaper = () => {
     setWallpaperUrl(DEFAULT_WALLPAPER);
-    localStorage.removeItem('casadash_wallpaper');
+    localStorage.removeItem('nestos_wallpaper');
     setWallpaperError('Wallpaper reset to default!');
     setTimeout(() => setWallpaperError(''), 3000);
   };
@@ -1156,7 +1173,7 @@ export default function App() {
       } else {
         next.add(appId);
       }
-      localStorage.setItem('casadash_hidden_apps', JSON.stringify(Array.from(next)));
+      localStorage.setItem('nestos_hidden_apps', JSON.stringify(Array.from(next)));
       return next;
     });
   };
@@ -1229,9 +1246,33 @@ export default function App() {
               transition={{ duration: 0.5, delay: 0.2, ease: "easeOut" }}
               className="flex flex-col items-center mb-8"
             >
-              <div className="w-16 h-16 bg-gradient-to-tr from-blue-600 to-blue-400 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-500/30 mb-5 relative group-hover:shadow-blue-500/50 transition-shadow duration-500">
-                <div className="absolute inset-0 bg-white/20 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-                <LayoutGrid size={32} className="text-white relative z-10" />
+              <div className="w-20 h-20 mb-5 relative flex items-center justify-center transition-transform duration-500 hover:rotate-12 hover:drop-shadow-[0_0_20px_rgba(251,146,60,0.6)]">
+                <svg viewBox="0 0 100 100" className="w-full h-full drop-shadow-[0_0_8px_rgba(251,146,60,0.3)]">
+                  <defs>
+                    <linearGradient id="oGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stopColor="#fbbf24" />
+                      <stop offset="50%" stopColor="#f97316" />
+                      <stop offset="100%" stopColor="#ea580c" />
+                    </linearGradient>
+                    <linearGradient id="bGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stopColor="#3b82f6" />
+                      <stop offset="100%" stopColor="#1e3a8a" />
+                    </linearGradient>
+                  </defs>
+                  <g fill="none" strokeWidth="4.5" strokeLinecap="round" opacity="0.95">
+                    <ellipse cx="50" cy="50" rx="44" ry="18" stroke="url(#oGrad)" transform="rotate(15 50 50)" />
+                    <ellipse cx="50" cy="50" rx="38" ry="14" stroke="url(#bGrad)" transform="rotate(45 50 50)" />
+                    <ellipse cx="50" cy="50" rx="42" ry="16" stroke="url(#oGrad)" transform="rotate(75 50 50)" />
+                    <ellipse cx="50" cy="50" rx="46" ry="20" stroke="url(#bGrad)" transform="rotate(105 50 50)" />
+                    <ellipse cx="50" cy="50" rx="40" ry="15" stroke="url(#oGrad)" transform="rotate(135 50 50)" />
+                    <ellipse cx="50" cy="50" rx="44" ry="18" stroke="url(#bGrad)" transform="rotate(165 50 50)" />
+                    <ellipse cx="50" cy="50" rx="34" ry="12" stroke="url(#oGrad)" transform="rotate(30 50 50)" />
+                    <ellipse cx="50" cy="50" rx="32" ry="10" stroke="url(#bGrad)" transform="rotate(90 50 50)" />
+                    <ellipse cx="50" cy="50" rx="36" ry="14" stroke="url(#oGrad)" transform="rotate(150 50 50)" />
+                  </g>
+                  <circle cx="50" cy="50" r="14" fill="#0f172a" stroke="url(#oGrad)" strokeWidth="6" />
+                  <circle cx="50" cy="50" r="4" fill="#ffffff" />
+                </svg>
               </div>
               <motion.h1 
                 initial={{ opacity: 0, y: 10 }}
@@ -1239,7 +1280,7 @@ export default function App() {
                 transition={{ duration: 0.4, delay: 0.3 }}
                 className="text-2xl md:text-3xl font-bold tracking-tight text-white mb-2"
               >
-                Welcome to CasaDash
+                Welcome to NestOs
               </motion.h1>
               <motion.p 
                 initial={{ opacity: 0, y: 10 }}
@@ -1567,20 +1608,62 @@ export default function App() {
       <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/60" />
 
       {/* Top Navigation Bar */}
-      <nav className="relative z-50 flex items-center justify-between px-4 md:px-8 py-4 backdrop-blur-md bg-black/10 border-b border-white/5">
-        <div className="flex items-center gap-4 md:gap-6">
-          <div className="flex items-center gap-2 font-bold text-xl tracking-tight">
-            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center shadow-lg shadow-blue-500/20">
-              <Home size={18} className="text-white" />
+      <motion.nav 
+        initial={{ y: 0 }}
+        animate={{ y: isNavVisible ? 0 : -100 }}
+        transition={{ duration: 0.3 }}
+        className="fixed top-0 inset-x-0 z-50 flex items-center justify-between px-4 md:px-8 py-4 bg-transparent"
+      >
+        <div className="flex items-center gap-4 md:gap-6 group cursor-pointer transition-all">
+          <div className="flex items-center gap-3 transition-transform group-hover:scale-105">
+            <div className="w-12 h-12 relative flex items-center justify-center -ml-2 transition-transform duration-300 group-hover:rotate-12 group-hover:drop-shadow-[0_0_15px_rgba(251,146,60,0.5)]">
+              <svg viewBox="0 0 100 100" className="w-full h-full drop-shadow-[0_0_8px_rgba(251,146,60,0.3)]">
+                <defs>
+                  <linearGradient id="oGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stopColor="#fbbf24" />
+                    <stop offset="50%" stopColor="#f97316" />
+                    <stop offset="100%" stopColor="#ea580c" />
+                  </linearGradient>
+                  <linearGradient id="bGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stopColor="#3b82f6" />
+                    <stop offset="100%" stopColor="#1e3a8a" />
+                  </linearGradient>
+                </defs>
+                <g fill="none" strokeWidth="4.5" strokeLinecap="round" opacity="0.95">
+                  <ellipse cx="50" cy="50" rx="44" ry="18" stroke="url(#oGrad)" transform="rotate(15 50 50)" />
+                  <ellipse cx="50" cy="50" rx="38" ry="14" stroke="url(#bGrad)" transform="rotate(45 50 50)" />
+                  <ellipse cx="50" cy="50" rx="42" ry="16" stroke="url(#oGrad)" transform="rotate(75 50 50)" />
+                  <ellipse cx="50" cy="50" rx="46" ry="20" stroke="url(#bGrad)" transform="rotate(105 50 50)" />
+                  <ellipse cx="50" cy="50" rx="40" ry="15" stroke="url(#oGrad)" transform="rotate(135 50 50)" />
+                  <ellipse cx="50" cy="50" rx="44" ry="18" stroke="url(#bGrad)" transform="rotate(165 50 50)" />
+                  <ellipse cx="50" cy="50" rx="34" ry="12" stroke="url(#oGrad)" transform="rotate(30 50 50)" />
+                  <ellipse cx="50" cy="50" rx="32" ry="10" stroke="url(#bGrad)" transform="rotate(90 50 50)" />
+                  <ellipse cx="50" cy="50" rx="36" ry="14" stroke="url(#oGrad)" transform="rotate(150 50 50)" />
+                </g>
+                <circle cx="50" cy="50" r="14" fill="#0f172a" stroke="url(#oGrad)" strokeWidth="6" />
+                <circle cx="50" cy="50" r="4" fill="#ffffff" />
+              </svg>
             </div>
-            <span className="hidden sm:inline">CasaDash</span>
+            <div className="flex flex-col">
+              <span className="hidden sm:inline font-bold text-3xl tracking-wide leading-none transition-colors group-hover:text-blue-100">
+                <span className="text-white">Nest</span>
+                <span className="text-[#8dbdf6] relative">
+                  O
+                  <span className="absolute top-[52%] left-1/2 -translate-x-1/2 -translate-y-1/2 w-1.5 h-1.5 bg-white rounded-full"></span>
+                </span>
+                <span className="text-[#8dbdf6]">s</span>
+              </span>
+              <span className="hidden sm:inline text-[9px] text-[#e2e8f0]/80 tracking-widest uppercase mt-0.5 font-semibold ml-[2px] transition-colors group-hover:text-white">
+                Intelligent Home OS
+              </span>
+            </div>
           </div>
         </div>
 
         <div className="flex items-center gap-3 md:gap-6">
-          <div className="flex items-center gap-2 md:gap-4 px-3 py-1.5 rounded-full bg-white/5 border border-white/10">
-            <Clock size={16} className="text-blue-400" />
-            <span className="text-sm font-mono tracking-wider">
+          <div className="flex items-center gap-2 md:gap-4 px-3 py-1.5 rounded-full bg-blue-500/5 border border-blue-500/20 shadow-[0_0_12px_rgba(59,130,246,0.3)] hover:bg-blue-500/10 hover:shadow-[0_0_20px_rgba(59,130,246,0.5)] transition-all cursor-pointer group">
+            <Clock size={16} className="text-blue-400 group-hover:text-blue-300 transition-colors" />
+            <span className="text-sm font-mono tracking-wider group-hover:text-white transition-colors">
               {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             </span>
           </div>
@@ -1594,7 +1677,7 @@ export default function App() {
                     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
                   }
                 }}
-                className="p-2 hover:bg-white/10 rounded-full transition-colors relative"
+                className="p-2 text-white/80 hover:text-white hover:scale-105 rounded-full transition-all relative bg-blue-500/5 border border-blue-500/20 shadow-[0_0_12px_rgba(59,130,246,0.3)] hover:bg-blue-500/10 hover:shadow-[0_0_20px_rgba(59,130,246,0.5)]"
               >
                 <Bell size={20} />
                 {notifications.some(n => !n.read) && (
@@ -1661,15 +1744,18 @@ export default function App() {
                 )}
               </AnimatePresence>
             </div>
-            <button onClick={handleLogout} className="p-2 hover:bg-white/10 rounded-full transition-colors text-red-400">
+            <button onClick={handleLogout} className="p-2 text-red-400/80 hover:text-red-400 hover:scale-105 rounded-full transition-all bg-red-500/5 border border-red-500/20 shadow-[0_0_12px_rgba(239,68,68,0.3)] hover:bg-red-500/10 hover:shadow-[0_0_20px_rgba(239,68,68,0.5)]">
               <Power size={20} />
             </button>
           </div>
         </div>
-      </nav>
+      </motion.nav>
 
       {/* Main Content Area */}
-      <main className="relative z-10 container mx-auto px-4 md:px-8 pt-6 md:pt-12 pb-24 h-[calc(100vh-76px)] overflow-y-auto custom-scrollbar">
+      <main 
+        onScroll={handleMainScroll}
+        className="relative z-10 container mx-auto px-4 md:px-8 pt-24 pb-24 h-screen overflow-y-auto custom-scrollbar"
+      >
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 md:gap-8">
           
           {/* Left Sidebar: System Info & Search */}
@@ -2012,7 +2098,7 @@ export default function App() {
                           <button 
                             onClick={() => {
                               setHiddenAppIds(new Set());
-                              localStorage.removeItem('casadash_hidden_apps');
+                              localStorage.removeItem('nestos_hidden_apps');
                             }}
                             className="w-full mt-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-white/60 text-xs transition-colors"
                           >

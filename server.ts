@@ -47,7 +47,15 @@ const setupDirectories = async () => {
   }
 };
 
-const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(32).toString('hex');
+let JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  try {
+    JWT_SECRET = fsSync.readFileSync('.jwt_secret', 'utf8');
+  } catch (e) {
+    JWT_SECRET = crypto.randomBytes(32).toString('hex');
+    fsSync.writeFileSync('.jwt_secret', JWT_SECRET);
+  }
+}
 
 // Setup multer for wallpaper uploads
 const uploadDir = path.join(process.cwd(), 'uploads');

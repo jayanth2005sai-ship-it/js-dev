@@ -8,7 +8,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 echo -e "${BLUE}=====================================================${NC}"
-echo -e "${GREEN}             🚀 CasaDash Installer 🚀              ${NC}"
+echo -e "${GREEN}             🚀 NestOs Installer 🚀              ${NC}"
 echo -e "${BLUE}=====================================================${NC}"
 
 echo -e "\n${YELLOW}[1/6] Installing System Dependencies...${NC}"
@@ -27,7 +27,7 @@ echo -e "\n${YELLOW}[3/6] Configuring Firewall (Opening Port 3000)...${NC}"
 sudo ufw allow 3000/tcp
 sudo ufw --force enable
 
-echo -e "\n${YELLOW}[4/6] Downloading CasaDash...${NC}"
+echo -e "\n${YELLOW}[4/6] Downloading NestOs...${NC}"
 echo -e "${GREEN}Please paste your GitHub Repository URL below:${NC}"
 read -p "> " REPO_URL
 
@@ -37,9 +37,9 @@ if [ -z "$REPO_URL" ]; then
 fi
 
 # Remove old folder if it exists and clone the new one
-rm -rf ~/casadash
-git clone "$REPO_URL" ~/casadash
-cd ~/casadash
+rm -rf ~/nestos
+git clone "$REPO_URL" ~/nestos
+cd ~/nestos
 
 echo -e "\n${YELLOW}[5/6] Configuring Environment & Building...${NC}"
 # Generate a persistent JWT Secret if it doesn't exist
@@ -51,12 +51,12 @@ fi
 npm install
 npm run build
 
-echo -e "\n${YELLOW}[6/6] Starting CasaDash with PM2...${NC}"
+echo -e "\n${YELLOW}[6/6] Starting NestOs with PM2...${NC}"
 # Install PM2 to keep the app running forever
 sudo npm install -g pm2
-pm2 stop casadash 2>/dev/null || true
+pm2 stop nestos 2>/dev/null || true
 # Use npm to start the app so it picks up the package.json scripts correctly
-pm2 start npm --name "casadash" -- start
+pm2 start npm --name "nestos" -- start
 pm2 save
 sudo pm2 startup | grep "sudo env" | bash || true
 
@@ -65,7 +65,7 @@ PUBLIC_IP=$(curl -s https://ifconfig.me)
 LOCAL_IP=$(hostname -I | awk '{print $1}')
 
 echo -e "\n${BLUE}=====================================================${NC}"
-echo -e "${GREEN}         ✅ CasaDash Installed Successfully!         ${NC}"
+echo -e "${GREEN}         ✅ NestOs Installed Successfully!         ${NC}"
 echo -e "${BLUE}=====================================================${NC}"
 echo -e "Your dashboard is now running in the background."
 echo -e "You can safely close this terminal.\n"
